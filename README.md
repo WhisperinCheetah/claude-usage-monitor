@@ -80,9 +80,12 @@ outside Claude Code.
 
 ## Pricing
 
-Hardcoded per-1M-token rates in `usage_monitor/pricing.py`
-(Opus 4.8 / Sonnet 4.6 / Haiku 4.5). Update that table when prices change.
-Unknown models fall back to the Opus rate so cost is never silently zero.
+Per-1M-token rates live in `usage_monitor/pricing.json` (model rates, fallback
+model, cache multipliers) — edit that file when prices change, no code edit
+needed. To customize without touching the repo, drop your own
+`~/.config/claude-usage-monitor/pricing.json` (same shape); it overrides the
+bundled defaults. Unknown models fall back to the configured fallback model so
+cost is never silently zero.
 
 ## Tests
 

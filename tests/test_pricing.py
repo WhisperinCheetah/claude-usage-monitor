@@ -1,5 +1,25 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from usage_monitor import pricing
+
+
+class TestPricingFile(unittest.TestCase):
+    def test_bundled_has_expected_models(self):
+        self.assertEqual(set(pricing.PRICING), {
+            "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"})
+
+    def test_load_pricing_reads_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "pricing.json"
+            p.write_text(json.dumps({
+                "models": {"claude-test-1": {"input": 2.0, "output": 8.0}},
+                "fallback_model": "claude-test-1",
+            }))
+            data = pricing.load_pricing(p)
+            self.assertEqual(data["models"]["claude-test-1"]["output"], 8.0)
+            self.assertEqual(data["fallback_model"], "claude-test-1")
 
 
 class TestNormalize(unittest.TestCase):

@@ -1,16 +1,33 @@
-"""Pay-as-you-go cost estimation for Claude API usage (per 1M tokens)."""
+"""Pay-as-you-go cost estimation for Claude API usage (per 1M tokens).
+
+Rates are loaded from a JSON file so prices can be changed without editing code.
+A user-supplied ``~/.config/claude-usage-monitor/pricing.json`` overrides the
+bundled defaults if present.
+"""
+import json
 import re
+from pathlib import Path
 
-PRICING = {
-    "claude-opus-4-8": {"input": 5.0, "output": 25.0},
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
-}
-FALLBACK_MODEL = "claude-opus-4-8"
-
-_CACHE_WRITE_MULT = 1.25  # 5-minute cache write = 1.25x input
-_CACHE_READ_MULT = 0.10   # cache read = 0.1x input
+_BUNDLED_JSON = Path(__file__).parent / "pricing.json"
+_USER_JSON = Path.home() / ".config" / "claude-usage-monitor" / "pricing.json"
 _MILLION = 1_000_000
+
+
+def pricing_file() -> Path:
+    """The pricing JSON in effect: the user override if present, else bundled."""
+    return _USER_JSON if _USER_JSON.is_file() else _BUNDLED_JSON
+
+
+def load_pricing(path=None) -> dict:
+    with Path(path or pricing_file()).open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+_data = load_pricing()
+PRICING = _data["models"]
+FALLBACK_MODEL = _data.get("fallback_model", "claude-opus-4-8")
+_CACHE_WRITE_MULT = _data.get("cache_write_multiplier", 1.25)
+_CACHE_READ_MULT = _data.get("cache_read_multiplier", 0.10)
 
 
 def normalize_model(model: str) -> str:
