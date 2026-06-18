@@ -21,13 +21,42 @@ Register a clickable launcher (per-user, no root):
 ./install.sh
 ```
 
-This installs a `.desktop` entry and icon under `~/.local`. Open the Activities
-overview, search **Claude Usage Monitor**, and launch it; right-click its dock
-icon and choose **Pin to Dash** to keep it on the bar. Remove with:
+This installs `.desktop` entries and an icon under `~/.local`. Open the
+Activities overview, search **Claude Usage Monitor**, and launch it; right-click
+its dock icon and choose **Pin to Dash** to keep it on the bar.
+
+### Top-bar indicator
+
+`install.sh` also registers a top-bar (AppIndicator) entry and an autostart
+entry. The indicator sits at the top-right of the GNOME panel, shows the cost
+for the configured timeframe as its label (updating every few seconds — at
+message-completion granularity, see below), and its menu lets you switch
+timeframe, open the full window, or quit. It starts automatically at next
+login; to start it now:
+
+```bash
+python3 run_tray.py &
+```
+
+Requires PyGObject + AppIndicator, which ship with Ubuntu GNOME. If missing:
+
+```bash
+sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
+```
+
+Remove everything (launchers, autostart, icon) with:
 
 ```bash
 ./uninstall.sh
 ```
+
+### A note on "live" cost
+
+Claude Code writes token usage to its transcripts only when an assistant
+message *completes*, so the figures update per message (every few seconds
+during an agentic task with many tool calls), not token-by-token within a
+single streaming response. True mid-generation cost isn't observable from
+outside Claude Code.
 
 ## Use
 

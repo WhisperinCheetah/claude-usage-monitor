@@ -32,9 +32,34 @@ Categories=System;Monitor;
 StartupNotify=false
 EOF
 
+# Top-bar indicator (AppIndicator): a launcher plus an autostart entry so the
+# indicator returns at every login.
+cat > "$DESKTOP_DIR/$APP_ID-tray.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Claude Usage Monitor (Top Bar)
+Comment=Top-bar indicator showing near-live Claude API cost
+Exec=$PY "$REPO_DIR/run_tray.py"
+Path=$REPO_DIR
+Icon=$APP_ID
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=false
+EOF
+
+AUTOSTART_DIR="$HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+cp "$DESKTOP_DIR/$APP_ID-tray.desktop" "$AUTOSTART_DIR/$APP_ID-tray.desktop"
+printf 'X-GNOME-Autostart-enabled=true\n' >> "$AUTOSTART_DIR/$APP_ID-tray.desktop"
+
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
-echo "Installed launcher: $DESKTOP_DIR/$APP_ID.desktop"
-echo "Open the Activities overview and search 'Claude Usage Monitor' to launch it,"
-echo "then right-click its dock icon and choose 'Pin to Dash' to keep it on the bar."
+echo "Installed:"
+echo "  - window launcher : $DESKTOP_DIR/$APP_ID.desktop"
+echo "  - top-bar launcher: $DESKTOP_DIR/$APP_ID-tray.desktop"
+echo "  - autostart       : $AUTOSTART_DIR/$APP_ID-tray.desktop"
+echo
+echo "The top-bar indicator starts automatically at next login. To start it now:"
+echo "  python3 \"$REPO_DIR/run_tray.py\" &"
+echo "It appears at the top-right; its menu opens the full monitor window."
