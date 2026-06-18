@@ -1,0 +1,5 @@
+{"timestamp":"2026-06-18T10:00:00.000Z","message":{"id":"msg_a","role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":300,"cache_read_input_tokens":400}}}
+{"timestamp":"2026-06-18T10:00:00.000Z","message":{"id":"msg_a","role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":300,"cache_read_input_tokens":400}}}
+{"timestamp":"2026-06-18T11:00:00.000Z","message":{"id":"msg_b","role":"assistant","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+{"timestamp":"2026-06-18T11:30:00.000Z","message":{"id":"msg_c","role":"user","content":"hi"}}
+{"not":"json valid line but parseable"}
