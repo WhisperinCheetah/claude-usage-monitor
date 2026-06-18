@@ -8,7 +8,7 @@ from usage_monitor.format import fmt_cost, fmt_tokens
 REFRESH_MS = 3000
 WINDOW_W = 384
 WINDOW_H = 168
-SEMI_ALPHA = 0.75  # opacity when "semi-transparent" is on
+SEMI_ALPHA = 0.85  # opacity when "semi-transparent" is on (whole window, incl. text)
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
     "claude-opus-4-8": "Opus",
