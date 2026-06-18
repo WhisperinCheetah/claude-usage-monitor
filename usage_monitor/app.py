@@ -6,8 +6,8 @@ from usage_monitor import aggregate, config, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
 
 REFRESH_MS = 3000
-WINDOW_W = 272
-WINDOW_H = 150
+WINDOW_W = 360
+WINDOW_H = 168
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
     "claude-opus-4-8": "Opus",
@@ -45,42 +45,50 @@ class UsageMonitorApp:
         return tk.Label(parent, text=text, **opts)
 
     def _build_widgets(self):
-        top = tk.Frame(self.root, bg="#1e1e1e")
-        top.pack(fill="x", padx=8, pady=(8, 2))
+        # Top bar: title + close button (substitutes for the removed native bar).
+        topbar = tk.Frame(self.root, bg="#1e1e1e")
+        topbar.pack(fill="x", padx=8, pady=(6, 0))
+        title = self._label(topbar, "Claude Usage", fg="#aaaaaa", font=("TkDefaultFont", 9, "bold"))
+        title.pack(side="left")
+        close_btn = self._label(topbar, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
+        close_btn.pack(side="right")
+        close_btn.bind("<Button-1>", lambda _e: self._on_close())
+
+        # Controls live at the bottom so their opened menus don't cover the figures.
+        controls = tk.Frame(self.root, bg="#1e1e1e")
+        controls.pack(side="bottom", fill="x", padx=8, pady=(2, 8))
 
         self.tf_var = tk.StringVar()
         tf_labels = [label for _, label in aggregate.TIMEFRAMES]
         self.tf_var.set(self._label_for_key(aggregate.TIMEFRAMES, self.cfg["timeframe"]))
-        tf_menu = tk.OptionMenu(top, self.tf_var, *tf_labels, command=lambda _=None: self._on_setting_change())
+        tf_menu = tk.OptionMenu(controls, self.tf_var, *tf_labels, command=lambda _=None: self._on_setting_change())
         # Fixed width (in chars) so the chosen label's length never changes layout.
         tf_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9),
                        width=14, anchor="w")
         tf_menu.pack(side="left")
 
-        close_btn = self._label(top, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
-        close_btn.pack(side="right", padx=(4, 0))
-        close_btn.bind("<Button-1>", lambda _e: self._on_close())
-
         self.mode_var = tk.StringVar()
         mode_labels = [label for _, label in _MODE_LABELS]
         self.mode_var.set(self._label_for_key(_MODE_LABELS, self.cfg["mode"]))
-        mode_menu = tk.OptionMenu(top, self.mode_var, *mode_labels, command=lambda _=None: self._on_setting_change())
+        mode_menu = tk.OptionMenu(controls, self.mode_var, *mode_labels, command=lambda _=None: self._on_setting_change())
         mode_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9),
                          width=8, anchor="w")
         mode_menu.pack(side="right")
 
+        self.status_label = self._label(self.root, "● starting…", fg="#777777", font=("TkDefaultFont", 8))
+        self.status_label.pack(side="bottom", anchor="w", padx=8)
+
         body = tk.Frame(self.root, bg="#1e1e1e")
-        body.pack(fill="x", padx=8)
+        body.pack(fill="x", padx=8, pady=(4, 2))
         self.tokens_label = self._label(body, "Tokens   —", font=("TkDefaultFont", 11))
         self.tokens_label.pack(anchor="w")
         self.cost_label = self._label(body, "Cost     —", font=("TkDefaultFont", 14, "bold"), fg="#7ec699")
         self.cost_label.pack(anchor="w")
         self.breakdown_label = self._label(body, "", fg="#999999", font=("TkDefaultFont", 9))
         self.breakdown_label.pack(anchor="w")
-        self.status_label = self._label(self.root, "● starting…", fg="#777777", font=("TkDefaultFont", 8))
-        self.status_label.pack(anchor="w", padx=8, pady=(2, 8))
 
-        self._drag_targets = [self.root, body, self.tokens_label, self.cost_label, self.breakdown_label]
+        self._drag_targets = [self.root, topbar, title, body,
+                              self.tokens_label, self.cost_label, self.breakdown_label]
 
     @staticmethod
     def _label_for_key(pairs, key):
