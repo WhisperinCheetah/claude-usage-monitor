@@ -42,7 +42,8 @@ class TestDeltaWindows(unittest.TestCase):
     def test_always_selectable_minutes(self):
         for tf in ("session", "today", "week", "month", "all"):
             keys = [k for k, _ in aggregate.delta_window_options(tf)]
-            self.assertEqual(keys[:4], ["5m", "10m", "30m", "60m"])
+            for w in ("5m", "10m", "30m", "60m"):
+                self.assertIn(w, keys)
 
     def test_month_offers_larger_than_day(self):
         day_keys = [k for k, _ in aggregate.delta_window_options("today")]

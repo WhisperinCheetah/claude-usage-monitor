@@ -13,6 +13,22 @@ Pure Python standard library. No dependencies, no build step, no network.
 python3 run.py
 ```
 
+## Desktop launcher (Ubuntu / GNOME)
+
+Register a clickable launcher (per-user, no root):
+
+```bash
+./install.sh
+```
+
+This installs a `.desktop` entry and icon under `~/.local`. Open the Activities
+overview, search **Claude Usage Monitor**, and launch it; right-click its dock
+icon and choose **Pin to Dash** to keep it on the bar. Remove with:
+
+```bash
+./uninstall.sh
+```
+
 ## Use
 
 - **Timeframe dropdown:** Current session, Today, This week (from Monday),

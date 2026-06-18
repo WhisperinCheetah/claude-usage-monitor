@@ -33,11 +33,11 @@ def timeframe_bounds(key: str, now: datetime):
 # Recent-spend "delta" windows. 5/10/30/60m are always selectable; larger
 # timeframes additionally offer longer windows. Each entry is (key, seconds).
 DELTA_WINDOWS = [
-    ("5m", 300), ("10m", 600), ("30m", 1800), ("60m", 3600),
+    ("1m", 60), ("5m", 300), ("10m", 600), ("30m", 1800), ("60m", 3600),
     ("6h", 21600), ("24h", 86400), ("7d", 604800), ("30d", 2592000),
 ]
 _DELTA_SECONDS = dict(DELTA_WINDOWS)
-_ALWAYS = ["5m", "10m", "30m", "60m"]
+_ALWAYS = ["1m", "5m", "10m", "30m", "60m"]
 _DELTA_BY_TIMEFRAME = {
     "session": _ALWAYS,
     "today": _ALWAYS,
