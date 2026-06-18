@@ -6,6 +6,8 @@ from usage_monitor import aggregate, config, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
 
 REFRESH_MS = 3000
+WINDOW_W = 272
+WINDOW_H = 150
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
     "claude-opus-4-8": "Opus",
@@ -23,11 +25,15 @@ class UsageMonitorApp:
 
         self.root = tk.Tk()
         self.root.title("Claude Usage")
+        self.root.overrideredirect(True)  # no native title bar / min / close
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#1e1e1e")
         self.root.resizable(False, False)
+        self.root.pack_propagate(False)  # fixed size — content never resizes the window
+        geo = f"{WINDOW_W}x{WINDOW_H}"
         if self.cfg.get("x") is not None and self.cfg.get("y") is not None:
-            self.root.geometry(f"+{self.cfg['x']}+{self.cfg['y']}")
+            geo += f"+{self.cfg['x']}+{self.cfg['y']}"
+        self.root.geometry(geo)
 
         self._build_widgets()
         self._bind_drag()
@@ -46,14 +52,21 @@ class UsageMonitorApp:
         tf_labels = [label for _, label in aggregate.TIMEFRAMES]
         self.tf_var.set(self._label_for_key(aggregate.TIMEFRAMES, self.cfg["timeframe"]))
         tf_menu = tk.OptionMenu(top, self.tf_var, *tf_labels, command=lambda _=None: self._on_setting_change())
-        tf_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9))
+        # Fixed width (in chars) so the chosen label's length never changes layout.
+        tf_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9),
+                       width=14, anchor="w")
         tf_menu.pack(side="left")
+
+        close_btn = self._label(top, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
+        close_btn.pack(side="right", padx=(4, 0))
+        close_btn.bind("<Button-1>", lambda _e: self._on_close())
 
         self.mode_var = tk.StringVar()
         mode_labels = [label for _, label in _MODE_LABELS]
         self.mode_var.set(self._label_for_key(_MODE_LABELS, self.cfg["mode"]))
         mode_menu = tk.OptionMenu(top, self.mode_var, *mode_labels, command=lambda _=None: self._on_setting_change())
-        mode_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9))
+        mode_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9),
+                         width=8, anchor="w")
         mode_menu.pack(side="right")
 
         body = tk.Frame(self.root, bg="#1e1e1e")
