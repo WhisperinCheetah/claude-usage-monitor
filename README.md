@@ -19,6 +19,11 @@ python3 run.py
   Last 7 days, This month, All-time.
 - **Cost dropdown:** Accurate (cache writes at 1.25×, reads at 0.1× input) or
   Simple (all input-side tokens at the flat input rate).
+- **Delta:** a stock-ticker-style `+$x.xx (window)` next to the cost shows how
+  much was spent in the most recent window. The window dropdown's choices and
+  default scale with the timeframe — `5m / 10m / 30m / 60m` are always
+  available; larger timeframes also offer `6h / 24h / 7d / 30d`. Switching the
+  timeframe resets the window to that timeframe's default.
 - Drag the body to move it; position, timeframe, and mode are remembered in
   `~/.config/claude-usage-monitor/config.json`.
 

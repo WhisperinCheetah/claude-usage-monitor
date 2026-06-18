@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-DEFAULTS = {"x": None, "y": None, "timeframe": "month", "mode": "accurate"}
+DEFAULTS = {"x": None, "y": None, "timeframe": "month", "mode": "accurate", "delta_window": "24h"}
 
 
 def config_path() -> Path:

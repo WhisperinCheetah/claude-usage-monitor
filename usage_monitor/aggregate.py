@@ -30,6 +30,48 @@ def timeframe_bounds(key: str, now: datetime):
     return (None, None)
 
 
+# Recent-spend "delta" windows. 5/10/30/60m are always selectable; larger
+# timeframes additionally offer longer windows. Each entry is (key, seconds).
+DELTA_WINDOWS = [
+    ("5m", 300), ("10m", 600), ("30m", 1800), ("60m", 3600),
+    ("6h", 21600), ("24h", 86400), ("7d", 604800), ("30d", 2592000),
+]
+_DELTA_SECONDS = dict(DELTA_WINDOWS)
+_ALWAYS = ["5m", "10m", "30m", "60m"]
+_DELTA_BY_TIMEFRAME = {
+    "session": _ALWAYS,
+    "today": _ALWAYS,
+    "week": _ALWAYS + ["6h", "24h"],
+    "last7days": _ALWAYS + ["6h", "24h"],
+    "month": _ALWAYS + ["6h", "24h", "7d"],
+    "all": _ALWAYS + ["6h", "24h", "7d", "30d"],
+}
+_DELTA_DEFAULT = {
+    "session": "5m", "today": "10m", "week": "60m",
+    "last7days": "60m", "month": "24h", "all": "24h",
+}
+
+
+def delta_window_options(timeframe_key: str):
+    keys = _DELTA_BY_TIMEFRAME.get(timeframe_key, _ALWAYS)
+    return [(k, _DELTA_SECONDS[k]) for k in keys]
+
+
+def delta_default(timeframe_key: str) -> str:
+    return _DELTA_DEFAULT.get(timeframe_key, "5m")
+
+
+def delta_seconds(key: str) -> int:
+    return _DELTA_SECONDS.get(key, 300)
+
+
+def recent_delta(records, now: datetime, window_seconds: int, mode: str) -> float:
+    """Cost of usage in the last `window_seconds` (the stock-ticker delta)."""
+    start = now - timedelta(seconds=window_seconds)
+    recent = filter_by_time(records, start, None)
+    return rollup(recent, mode)["total_cost"]
+
+
 def filter_by_time(records, start: Optional[datetime], end: Optional[datetime]):
     out = []
     for r in records:

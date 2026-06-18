@@ -6,7 +6,7 @@ from usage_monitor import aggregate, config, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
 
 REFRESH_MS = 3000
-WINDOW_W = 360
+WINDOW_W = 384
 WINDOW_H = 168
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
@@ -61,11 +61,21 @@ class UsageMonitorApp:
         self.tf_var = tk.StringVar()
         tf_labels = [label for _, label in aggregate.TIMEFRAMES]
         self.tf_var.set(self._label_for_key(aggregate.TIMEFRAMES, self.cfg["timeframe"]))
-        tf_menu = tk.OptionMenu(controls, self.tf_var, *tf_labels, command=lambda _=None: self._on_setting_change())
+        tf_menu = tk.OptionMenu(controls, self.tf_var, *tf_labels,
+                                command=lambda _=None: self._on_timeframe_change())
         # Fixed width (in chars) so the chosen label's length never changes layout.
         tf_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0, font=("TkDefaultFont", 9),
-                       width=14, anchor="w")
+                       width=15, anchor="w")
         tf_menu.pack(side="left")
+
+        # Delta-window selector — options/default scale with the timeframe.
+        self.delta_var = tk.StringVar()
+        self.delta_var.set(self._initial_delta_key())
+        self.delta_menu = tk.OptionMenu(controls, self.delta_var, self.delta_var.get())
+        self.delta_menu.config(bg="#2d2d2d", fg="#dddddd", highlightthickness=0,
+                               font=("TkDefaultFont", 9), width=4, anchor="w")
+        self.delta_menu.pack(side="left", padx=(6, 0))
+        self._populate_delta_menu()
 
         self.mode_var = tk.StringVar()
         mode_labels = [label for _, label in _MODE_LABELS]
@@ -82,13 +92,20 @@ class UsageMonitorApp:
         body.pack(fill="x", padx=8, pady=(4, 2))
         self.tokens_label = self._label(body, "Tokens   —", font=("TkDefaultFont", 11))
         self.tokens_label.pack(anchor="w")
-        self.cost_label = self._label(body, "Cost     —", font=("TkDefaultFont", 14, "bold"), fg="#7ec699")
-        self.cost_label.pack(anchor="w")
+
+        cost_row = tk.Frame(body, bg="#1e1e1e")
+        cost_row.pack(anchor="w", fill="x")
+        self.cost_label = self._label(cost_row, "Cost     —", font=("TkDefaultFont", 14, "bold"), fg="#7ec699")
+        self.cost_label.pack(side="left")
+        self.delta_label = self._label(cost_row, "", font=("TkDefaultFont", 10), fg="#777777")
+        self.delta_label.pack(side="left", padx=(8, 0))
+
         self.breakdown_label = self._label(body, "", fg="#999999", font=("TkDefaultFont", 9))
         self.breakdown_label.pack(anchor="w")
 
-        self._drag_targets = [self.root, topbar, title, body,
-                              self.tokens_label, self.cost_label, self.breakdown_label]
+        self._drag_targets = [self.root, topbar, title, body, cost_row,
+                              self.tokens_label, self.cost_label, self.delta_label,
+                              self.breakdown_label]
 
     @staticmethod
     def _label_for_key(pairs, key):
@@ -103,6 +120,26 @@ class UsageMonitorApp:
             if lab == label:
                 return k
         return pairs[0][0]
+
+    def _initial_delta_key(self):
+        tf = self.cfg["timeframe"]
+        valid = [k for k, _ in aggregate.delta_window_options(tf)]
+        saved = self.cfg.get("delta_window")
+        return saved if saved in valid else aggregate.delta_default(tf)
+
+    def _populate_delta_menu(self):
+        tf = self._current_timeframe_key()
+        opts = [k for k, _ in aggregate.delta_window_options(tf)]
+        menu = self.delta_menu["menu"]
+        menu.delete(0, "end")
+        for key in opts:
+            menu.add_command(label=key, command=lambda v=key: self._select_delta(v))
+        if self.delta_var.get() not in opts:
+            self.delta_var.set(aggregate.delta_default(tf))
+
+    def _select_delta(self, key):
+        self.delta_var.set(key)
+        self._on_setting_change()
 
     def _bind_drag(self):
         for w in self._drag_targets:
@@ -128,9 +165,18 @@ class UsageMonitorApp:
         self._save()
         self.refresh()
 
+    def _on_timeframe_change(self):
+        # Reset the delta window to the new timeframe's scaled default, then
+        # rebuild the selectable options for it.
+        self.delta_var.set(aggregate.delta_default(self._current_timeframe_key()))
+        self._populate_delta_menu()
+        self._save()
+        self.refresh()
+
     def _save(self):
         self.cfg["timeframe"] = self._current_timeframe_key()
         self.cfg["mode"] = self._current_mode_key()
+        self.cfg["delta_window"] = self.delta_var.get()
         self.cfg["x"] = self.root.winfo_x()
         self.cfg["y"] = self.root.winfo_y()
         config.save_config(self.config_file, self.cfg)
@@ -156,6 +202,15 @@ class UsageMonitorApp:
         self.tokens_label.config(text=f"Tokens   {fmt_tokens(result['total_tokens'])}")
         self.cost_label.config(text=f"Cost     {fmt_cost(result['total_cost'])}")
         self.breakdown_label.config(text=self._breakdown_text(result["by_model"]))
+
+        win = self.delta_var.get()
+        delta = aggregate.recent_delta(
+            selected, datetime.now(timezone.utc), aggregate.delta_seconds(win), mode
+        )
+        self.delta_label.config(
+            text=f"+{fmt_cost(delta)} ({win})",
+            fg="#7ec699" if delta > 0 else "#777777",
+        )
         self.status_label.config(text=f"● updated {datetime.now().strftime('%H:%M:%S')}")
 
     @staticmethod

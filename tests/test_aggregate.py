@@ -38,6 +38,41 @@ class TestBounds(unittest.TestCase):
         self.assertEqual(aggregate.timeframe_bounds("all", self.now), (None, None))
 
 
+class TestDeltaWindows(unittest.TestCase):
+    def test_always_selectable_minutes(self):
+        for tf in ("session", "today", "week", "month", "all"):
+            keys = [k for k, _ in aggregate.delta_window_options(tf)]
+            self.assertEqual(keys[:4], ["5m", "10m", "30m", "60m"])
+
+    def test_month_offers_larger_than_day(self):
+        day_keys = [k for k, _ in aggregate.delta_window_options("today")]
+        month_keys = [k for k, _ in aggregate.delta_window_options("month")]
+        self.assertNotIn("24h", day_keys)
+        self.assertIn("24h", month_keys)
+        self.assertGreater(len(month_keys), len(day_keys))
+
+    def test_default_scales_with_timeframe(self):
+        self.assertEqual(aggregate.delta_default("today"), "10m")
+        self.assertEqual(aggregate.delta_default("month"), "24h")
+
+    def test_delta_seconds(self):
+        self.assertEqual(aggregate.delta_seconds("5m"), 300)
+        self.assertEqual(aggregate.delta_seconds("24h"), 86400)
+        self.assertEqual(aggregate.delta_seconds("unknown"), 300)  # fallback
+
+    def test_recent_delta(self):
+        from datetime import timedelta
+        now = self_now()
+        recs = [
+            rec(now - timedelta(minutes=2), o=1_000_000, model="claude-opus-4-8", mid="a"),
+            rec(now - timedelta(hours=2), o=1_000_000, model="claude-opus-4-8", mid="b"),
+        ]
+        # 5m window: only the 2-min-old record -> $25.00
+        self.assertAlmostEqual(aggregate.recent_delta(recs, now, 300, "accurate"), 25.0)
+        # 24h window: both -> $50.00
+        self.assertAlmostEqual(aggregate.recent_delta(recs, now, 86400, "accurate"), 50.0)
+
+
 class TestFilterAndRollup(unittest.TestCase):
     def test_filter_by_time(self):
         recs = [
