@@ -8,6 +8,7 @@ from usage_monitor.format import fmt_cost, fmt_tokens
 REFRESH_MS = 3000
 WINDOW_W = 384
 WINDOW_H = 168
+SEMI_ALPHA = 0.75  # opacity when "semi-transparent" is on
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
     "claude-opus-4-8": "Opus",
@@ -35,7 +36,11 @@ class UsageMonitorApp:
             geo += f"+{self.cfg['x']}+{self.cfg['y']}"
         self.root.geometry(geo)
 
+        self._translucent = bool(self.cfg.get("translucent", False))
+        self.root.attributes("-alpha", SEMI_ALPHA if self._translucent else 1.0)
+
         self._build_widgets()
+        self._build_context_menu()
         self._bind_drag()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -141,10 +146,28 @@ class UsageMonitorApp:
         self.delta_var.set(key)
         self._on_setting_change()
 
+    def _build_context_menu(self):
+        self._translucent_var = tk.BooleanVar(value=self._translucent)
+        self._ctx = tk.Menu(self.root, tearoff=0)
+        self._ctx.add_checkbutton(label="Semi-transparent",
+                                  variable=self._translucent_var,
+                                  command=self._toggle_opacity)
+        self._ctx.add_separator()
+        self._ctx.add_command(label="Quit", command=self._on_close)
+
+    def _show_context_menu(self, event):
+        self._ctx.tk_popup(event.x_root, event.y_root)
+
+    def _toggle_opacity(self):
+        self._translucent = self._translucent_var.get()
+        self.root.attributes("-alpha", SEMI_ALPHA if self._translucent else 1.0)
+        self._save()
+
     def _bind_drag(self):
         for w in self._drag_targets:
             w.bind("<Button-1>", self._start_drag)
             w.bind("<B1-Motion>", self._on_drag)
+            w.bind("<Button-3>", self._show_context_menu)
 
     def _start_drag(self, event):
         self._drag_x = event.x_root - self.root.winfo_x()
@@ -177,6 +200,7 @@ class UsageMonitorApp:
         self.cfg["timeframe"] = self._current_timeframe_key()
         self.cfg["mode"] = self._current_mode_key()
         self.cfg["delta_window"] = self.delta_var.get()
+        self.cfg["translucent"] = self._translucent
         self.cfg["x"] = self.root.winfo_x()
         self.cfg["y"] = self.root.winfo_y()
         config.save_config(self.config_file, self.cfg)

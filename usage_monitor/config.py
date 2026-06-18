@@ -2,7 +2,12 @@
 import json
 from pathlib import Path
 
-DEFAULTS = {"x": None, "y": None, "timeframe": "month", "mode": "accurate", "delta_window": "24h"}
+DEFAULTS = {
+    "x": None, "y": None,
+    "timeframe": "month", "mode": "accurate", "delta_window": "24h",
+    "translucent": False,      # widget semi-transparency toggle
+    "tray_show_delta": False,  # tray label shows recent delta vs. total
+}
 
 
 def config_path() -> Path:
