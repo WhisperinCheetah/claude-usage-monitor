@@ -13,6 +13,41 @@ Pure Python standard library. No dependencies, no build step, no network.
 python3 run.py
 ```
 
+## Platform support
+
+| | Widget (`run.py`) | Launcher / login item | Top-bar tray |
+|---|---|---|---|
+| **Linux (GNOME)** | yes (frameless) | `install.sh` | yes (`run_tray.py`) |
+| **Windows** | yes (frameless) | `install_windows.ps1` | — |
+| **macOS** | yes (titled window) | `install_macos.sh` | — |
+
+The widget core is pure-stdlib Python and runs on all three. On macOS the window
+uses a normal title bar (borderless windows are unreliable on Aqua) and
+right-click is mapped to the correct mouse button automatically. The GNOME
+top-bar tray is Linux-only. Settings are stored in the OS-native config dir
+(`~/.config` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on
+Windows).
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_windows.ps1
+```
+
+Creates Start Menu and Startup shortcuts that launch via `pythonw.exe` (no
+console window). Remove with `.\uninstall_windows.ps1`. Or just run
+`pythonw run.py`.
+
+### macOS
+
+```bash
+./install_macos.sh
+```
+
+Installs a `Claude Usage Monitor.app` in `~/Applications` and a login item.
+Remove with `./uninstall_macos.sh`. Or just run `python3 run.py` (use a
+python.org build for a working Tk 8.6).
+
 ## Desktop launcher (Ubuntu / GNOME)
 
 Register a clickable launcher (per-user, no root):

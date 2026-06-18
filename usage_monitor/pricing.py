@@ -1,21 +1,23 @@
 """Pay-as-you-go cost estimation for Claude API usage (per 1M tokens).
 
 Rates are loaded from a JSON file so prices can be changed without editing code.
-A user-supplied ``~/.config/claude-usage-monitor/pricing.json`` overrides the
+A user-supplied ``pricing.json`` in the OS-native config directory overrides the
 bundled defaults if present.
 """
 import json
 import re
 from pathlib import Path
 
+from usage_monitor import paths
+
 _BUNDLED_JSON = Path(__file__).parent / "pricing.json"
-_USER_JSON = Path.home() / ".config" / "claude-usage-monitor" / "pricing.json"
 _MILLION = 1_000_000
 
 
 def pricing_file() -> Path:
     """The pricing JSON in effect: the user override if present, else bundled."""
-    return _USER_JSON if _USER_JSON.is_file() else _BUNDLED_JSON
+    user_json = paths.config_dir() / "pricing.json"
+    return user_json if user_json.is_file() else _BUNDLED_JSON
 
 
 def load_pricing(path=None) -> dict:

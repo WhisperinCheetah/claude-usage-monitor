@@ -55,7 +55,14 @@ class UsageMonitorApp:
 
         self.root = tk.Tk()
         self.root.title("Claude Usage")
-        self.root.overrideredirect(True)  # no native title bar / min / close
+        self._winsys = self.root.tk.call("tk", "windowingsystem")  # aqua | win32 | x11
+        # Frameless everywhere except macOS, where borderless (overrideredirect)
+        # windows are unreliable on Aqua — use a normal titled window there.
+        self._frameless = self._winsys != "aqua"
+        if self._frameless:
+            self.root.overrideredirect(True)  # no native title bar / min / close
+        # Right mouse button is <Button-2> on macOS, <Button-3> elsewhere.
+        self._rmb = "<Button-2>" if self._winsys == "aqua" else "<Button-3>"
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#1e1e1e")
         self.root.resizable(False, False)
@@ -288,7 +295,9 @@ class UsageMonitorApp:
         for w in self._drag_targets:
             w.bind("<Button-1>", self._start_drag)
             w.bind("<B1-Motion>", self._on_drag)
-            w.bind("<Button-3>", self._show_context_menu)
+            w.bind(self._rmb, self._show_context_menu)  # platform right-click
+            if self._winsys == "aqua":
+                w.bind("<Control-Button-1>", self._show_context_menu)  # mac alt
 
     def _start_drag(self, event):
         self._drag_x = event.x_root - self.root.winfo_x()

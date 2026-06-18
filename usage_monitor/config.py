@@ -1,6 +1,8 @@
-"""Load/save widget settings as JSON under ~/.config."""
+"""Load/save widget settings as JSON in the OS-native config directory."""
 import json
 from pathlib import Path
+
+from usage_monitor import paths
 
 DEFAULTS = {
     "x": None, "y": None,
@@ -12,7 +14,7 @@ DEFAULTS = {
 
 
 def config_path() -> Path:
-    return Path.home() / ".config" / "claude-usage-monitor" / "config.json"
+    return paths.config_dir() / "config.json"
 
 
 def load_config(path: Path) -> dict:
