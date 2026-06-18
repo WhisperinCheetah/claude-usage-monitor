@@ -38,6 +38,12 @@ login; to start it now:
 python3 run_tray.py &
 ```
 
+The indicator icon is **color-coded by recent activity**: gray when idle,
+ramping to vivid green as spend over the last 10 minutes rises, fully green at
+about $6 in that window. Tune the window and scale via `COLOR_WINDOW_SECONDS` /
+`COLOR_MAX_SPEND` in `usage_monitor/heat.py`. (The color always reflects this
+fixed window, independent of the timeframe shown in the label.)
+
 Requires PyGObject + AppIndicator, which ship with Ubuntu GNOME. If missing:
 
 ```bash

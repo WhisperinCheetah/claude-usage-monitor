@@ -21,7 +21,7 @@ except (ValueError, ImportError):  # older systems
     from gi.repository import AppIndicator3 as AppIndicator
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from usage_monitor import aggregate, config, transcripts  # noqa: E402
+from usage_monitor import aggregate, config, heat, transcripts  # noqa: E402
 from usage_monitor.format import fmt_cost  # noqa: E402
 
 REFRESH_SECONDS = 3
@@ -39,12 +39,16 @@ class TrayApp:
         self.cfg = config.load_config(self.config_file)
         self.cache = transcripts.TranscriptCache()
 
+        # Pre-render the gray->green gradient icons and tint the indicator by
+        # recent-spend bucket (see usage_monitor/heat.py).
+        self._icon_dir = self._generate_icons()
+        self._cur_bucket = 0
+
         self.indicator = AppIndicator.Indicator.new(
-            APP_ID, "icon", AppIndicator.IndicatorCategory.APPLICATION_STATUS
+            APP_ID, "heat-00", AppIndicator.IndicatorCategory.APPLICATION_STATUS
         )
-        # Load the icon from the repo (works whether or not install.sh ran).
-        self.indicator.set_icon_theme_path(str(_PACKAGING))
-        self.indicator.set_icon_full("icon", "Claude Usage Monitor")
+        self.indicator.set_icon_theme_path(str(self._icon_dir))
+        self.indicator.set_icon_full("heat-00", "Claude Usage Monitor")
         self.indicator.set_title("Claude Usage Monitor")
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_label("…", _LABEL_GUIDE)
@@ -52,6 +56,15 @@ class TrayApp:
         self._build_menu()
         self.refresh()
         GLib.timeout_add_seconds(REFRESH_SECONDS, self._tick)
+
+    def _generate_icons(self):
+        icon_dir = Path.home() / ".cache" / APP_ID / "icons"
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(heat.N_BUCKETS):
+            (icon_dir / f"heat-{i:02d}.svg").write_text(
+                heat.gradient_svg(heat.bucket_color_hex(i)), encoding="utf-8"
+            )
+        return icon_dir
 
     def _build_menu(self):
         menu = Gtk.Menu()
@@ -125,6 +138,14 @@ class TrayApp:
         self.header_item.set_label(
             f"{tf_label}: {fmt_cost(total)}    +{fmt_cost(delta)} ({win})"
         )
+
+        # Tint the icon by spend over the fixed color window (independent of the
+        # selected timeframe), so the color always means "recent activity".
+        burn = aggregate.recent_delta(records, now, heat.COLOR_WINDOW_SECONDS, mode)
+        b = heat.bucket(burn)
+        if b != self._cur_bucket:
+            self.indicator.set_icon_full(f"heat-{b:02d}", "Claude Usage Monitor")
+            self._cur_bucket = b
 
     def _tick(self):
         self.refresh()
