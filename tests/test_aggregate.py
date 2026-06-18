@@ -38,6 +38,21 @@ class TestBounds(unittest.TestCase):
         self.assertEqual(aggregate.timeframe_bounds("all", self.now), (None, None))
 
 
+class TestLatestRecord(unittest.TestCase):
+    def test_none_when_empty(self):
+        self.assertIsNone(aggregate.latest_record([]))
+
+    def test_picks_max_timestamp(self):
+        from datetime import timedelta
+        now = self_now()
+        recs = [
+            rec(now - timedelta(hours=2), mid="old"),
+            rec(now, mid="new"),
+            rec(now - timedelta(minutes=5), mid="mid"),
+        ]
+        self.assertEqual(aggregate.latest_record(recs).message_id, "new")
+
+
 class TestDeltaWindows(unittest.TestCase):
     def test_always_selectable_minutes(self):
         for tf in ("session", "today", "week", "month", "all"):

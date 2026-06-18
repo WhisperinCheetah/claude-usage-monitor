@@ -7,6 +7,7 @@ DEFAULTS = {
     "timeframe": "month", "mode": "accurate", "delta_window": "24h",
     "translucent": False,      # widget semi-transparency toggle
     "tray_show_delta": False,  # tray label shows recent delta vs. total
+    "spark_range": "24h",      # sparkline range (1h / 24h / 7d / 30d)
 }
 
 

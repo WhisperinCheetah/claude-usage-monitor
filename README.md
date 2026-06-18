@@ -80,10 +80,16 @@ outside Claude Code.
   default scale with the timeframe — `5m / 10m / 30m / 60m` are always
   available; larger timeframes also offer `6h / 24h / 7d / 30d`. Switching the
   timeframe resets the window to that timeframe's default.
+- A **`●` model dot** (top-left) shows which model your most recent message
+  used; the **cost number rolls** up/down when it changes and **pulses** green
+  while recent burn is high; each completed turn briefly **flashes** its own
+  cost (top-right, green fading to grey).
+- A **sparkline** of recent cost sits below the figures — **click it** to cycle
+  the range (1h / 24h / 7d / 30d).
 - Drag the body to move it. **Right-click** for a menu to toggle
   **Semi-transparent** (see-through but readable) or quit.
-- Position, timeframe, mode, and transparency are remembered in
-  `~/.config/claude-usage-monitor/config.json`.
+- Position, timeframe, mode, transparency, and sparkline range are remembered
+  in `~/.config/claude-usage-monitor/config.json`.
 
 ## Pricing
 

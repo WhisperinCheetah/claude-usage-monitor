@@ -83,6 +83,15 @@ def filter_by_time(records, start: Optional[datetime], end: Optional[datetime]):
     return out
 
 
+def latest_record(records):
+    """The most recent record by timestamp, or None."""
+    latest = None
+    for r in records:
+        if latest is None or r.timestamp > latest.timestamp:
+            latest = r
+    return latest
+
+
 def session_file(paths) -> Optional[Path]:
     newest = None
     newest_mtime = None

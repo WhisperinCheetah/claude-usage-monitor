@@ -1,20 +1,49 @@
 """Always-on-top Tkinter widget showing Claude token usage and estimated cost."""
+import math
 import tkinter as tk
 from datetime import datetime, timezone
 
-from usage_monitor import aggregate, config, transcripts
+from usage_monitor import aggregate, config, heat, pricing, sparkline, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
 
 REFRESH_MS = 3000
 WINDOW_W = 384
-WINDOW_H = 168
+WINDOW_H = 206
+SPARK_H = 26
 SEMI_ALPHA = 0.85  # opacity when "semi-transparent" is on (whole window, incl. text)
+HOT_BUCKET = 11    # heat bucket (of 16) at/above which the cost number pulses
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
     "claude-opus-4-8": "Opus",
     "claude-sonnet-4-6": "Sonnet",
     "claude-haiku-4-5": "Haiku",
 }
+_MODEL_COLORS = {
+    "claude-opus-4-8": "#7ec699",
+    "claude-sonnet-4-6": "#6fb3d9",
+    "claude-haiku-4-5": "#c39bd3",
+}
+_COST_BASE = "#7ec699"   # normal cost-number color
+_COST_HOT = "#caf7d8"    # peak of the "hot" pulse
+_FLASH_GREEN = "#7ee787"
+_FLASH_GREY = "#8a8a8a"
+_DIM = "#777777"
+
+
+def _hex_rgb(h):
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _blend(a, b, t):
+    t = max(0.0, min(1.0, t))
+    ar, ag, ab = _hex_rgb(a)
+    br, bg, bb = _hex_rgb(b)
+    return f"#{round(ar+(br-ar)*t):02x}{round(ag+(bg-ag)*t):02x}{round(ab+(bb-ab)*t):02x}"
+
+
+def _flash_sequence(n=10):
+    return [_blend(_FLASH_GREEN, _FLASH_GREY, i / (n - 1)) for i in range(n)]
 
 
 class UsageMonitorApp:
@@ -39,6 +68,16 @@ class UsageMonitorApp:
         self._translucent = bool(self.cfg.get("translucent", False))
         self.root.attributes("-alpha", SEMI_ALPHA if self._translucent else 1.0)
 
+        # Animation / effect state.
+        self._cost_shown = 0.0           # currently-displayed cost (for roll-up)
+        self._cost_target = 0.0
+        self._cost_animating = False
+        self._last_msg_id = None         # for "cost of that answer" flash
+        self._hot = False                # recent burn in the top bucket -> pulse
+        self._pulse_phase = 0.0
+        self._flash_seq = _flash_sequence()
+        self._flash_idx = len(self._flash_seq)  # idle
+
         self._build_widgets()
         self._build_context_menu()
         self._bind_drag()
@@ -50,14 +89,17 @@ class UsageMonitorApp:
         return tk.Label(parent, text=text, **opts)
 
     def _build_widgets(self):
-        # Top bar: title + close button (substitutes for the removed native bar).
+        # Top bar: "currently on" model dot (left), per-turn flash + close (right).
         topbar = tk.Frame(self.root, bg="#1e1e1e")
         topbar.pack(fill="x", padx=8, pady=(6, 0))
-        title = self._label(topbar, "Claude Usage", fg="#aaaaaa", font=("TkDefaultFont", 9, "bold"))
-        title.pack(side="left")
+        self.model_label = self._label(topbar, "● —", fg=_DIM,
+                                       font=("TkDefaultFont", 9, "bold"))
+        self.model_label.pack(side="left")
         close_btn = self._label(topbar, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda _e: self._on_close())
+        self.flash_label = self._label(topbar, "", fg=_FLASH_GREY, font=("TkDefaultFont", 9))
+        self.flash_label.pack(side="right", padx=(0, 8))
 
         # Controls live at the bottom so their opened menus don't cover the figures.
         controls = tk.Frame(self.root, bg="#1e1e1e")
@@ -100,17 +142,22 @@ class UsageMonitorApp:
 
         cost_row = tk.Frame(body, bg="#1e1e1e")
         cost_row.pack(anchor="w", fill="x")
-        self.cost_label = self._label(cost_row, "Cost     —", font=("TkDefaultFont", 14, "bold"), fg="#7ec699")
+        self.cost_label = self._label(cost_row, "Cost     —", font=("TkDefaultFont", 14, "bold"), fg=_COST_BASE)
         self.cost_label.pack(side="left")
-        self.delta_label = self._label(cost_row, "", font=("TkDefaultFont", 10), fg="#777777")
+        self.delta_label = self._label(cost_row, "", font=("TkDefaultFont", 10), fg=_DIM)
         self.delta_label.pack(side="left", padx=(8, 0))
 
         self.breakdown_label = self._label(body, "", fg="#999999", font=("TkDefaultFont", 9))
         self.breakdown_label.pack(anchor="w")
 
-        self._drag_targets = [self.root, topbar, title, body, cost_row,
-                              self.tokens_label, self.cost_label, self.delta_label,
-                              self.breakdown_label]
+        # Sparkline of recent cost; click to cycle its range.
+        self.spark = tk.Canvas(self.root, height=SPARK_H, bg="#1e1e1e", highlightthickness=0)
+        self.spark.pack(fill="x", padx=8, pady=(2, 2))
+        self.spark.bind("<Button-1>", self._cycle_spark_range)
+
+        self._drag_targets = [self.root, topbar, self.model_label, self.flash_label,
+                              body, cost_row, self.tokens_label, self.cost_label,
+                              self.delta_label, self.breakdown_label]
 
     @staticmethod
     def _label_for_key(pairs, key):
@@ -145,6 +192,80 @@ class UsageMonitorApp:
     def _select_delta(self, key):
         self.delta_var.set(key)
         self._on_setting_change()
+
+    # --- effects -------------------------------------------------------------
+
+    def _set_cost(self, target):
+        """Animate the cost number rolling toward `target`."""
+        self._cost_target = target
+        if not self._cost_animating:
+            self._cost_animating = True
+            self._cost_tick()
+
+    def _cost_tick(self):
+        diff = self._cost_target - self._cost_shown
+        if abs(diff) < 0.005:
+            self._cost_shown = self._cost_target
+            self._cost_animating = False
+        else:
+            self._cost_shown += diff * 0.3  # exponential ease toward target
+        self.cost_label.config(text=f"Cost     {fmt_cost(self._cost_shown)}")
+        if self._cost_animating:
+            self.root.after(30, self._cost_tick)
+
+    def _flash_turn(self, cost):
+        """Subtle per-turn flash: bright green fading to grey, then it lingers."""
+        self.flash_label.config(text=f"+{fmt_cost(cost)}", fg=self._flash_seq[0])
+        self._flash_idx = 1
+        self.root.after(110, self._flash_step)
+
+    def _flash_step(self):
+        if self._flash_idx >= len(self._flash_seq):
+            return  # stays at the final grey
+        self.flash_label.config(fg=self._flash_seq[self._flash_idx])
+        self._flash_idx += 1
+        self.root.after(110, self._flash_step)
+
+    def _pulse_step(self):
+        if self._hot:
+            self._pulse_phase += 0.20
+            t = (math.sin(self._pulse_phase) + 1) / 2
+            self.cost_label.config(fg=_blend(_COST_BASE, _COST_HOT, t))
+        else:
+            self.cost_label.config(fg=_COST_BASE)
+        self.root.after(90, self._pulse_step)
+
+    def _update_model_dot(self, model):
+        if not model:
+            self.model_label.config(text="● —", fg=_DIM)
+            return
+        norm = pricing.normalize_model(model)
+        short = _MODEL_SHORT.get(norm, norm)
+        self.model_label.config(text=f"● {short}", fg=_MODEL_COLORS.get(norm, "#aaaaaa"))
+
+    def _draw_sparkline(self, values):
+        c = self.spark
+        c.delete("all")
+        w = c.winfo_width() or (WINDOW_W - 16)
+        n = len(values)
+        if n:
+            mx = max(values) or 1.0
+            bw = w / n
+            for i, v in enumerate(values):
+                if v <= 0:
+                    continue
+                bh = (v / mx) * (SPARK_H - 6)
+                x0, x1 = i * bw + 1, (i + 1) * bw - 1
+                y1, y0 = SPARK_H - 2, SPARK_H - 2 - bh
+                color = _COST_HOT if i == n - 1 else _COST_BASE  # newest bar brighter
+                c.create_rectangle(x0, y0, x1, y1, fill=color, width=0)
+        c.create_text(2, 0, anchor="nw", text=self.cfg.get("spark_range", "24h"),
+                      fill="#666666", font=("TkDefaultFont", 7))
+
+    def _cycle_spark_range(self, _event=None):
+        self.cfg["spark_range"] = sparkline.next_range(self.cfg.get("spark_range", "24h"))
+        config.save_config(self.config_file, self.cfg)
+        self.refresh()
 
     def _build_context_menu(self):
         self._translucent_var = tk.BooleanVar(value=self._translucent)
@@ -222,19 +343,38 @@ class UsageMonitorApp:
             start, end = aggregate.timeframe_bounds(tf, datetime.now(timezone.utc))
             selected = aggregate.filter_by_time(records, start, end)
 
+        now = datetime.now(timezone.utc)
         result = aggregate.rollup(selected, mode)
         self.tokens_label.config(text=f"Tokens   {fmt_tokens(result['total_tokens'])}")
-        self.cost_label.config(text=f"Cost     {fmt_cost(result['total_cost'])}")
+        self._set_cost(result["total_cost"])  # animated roll-up
         self.breakdown_label.config(text=self._breakdown_text(result["by_model"]))
 
         win = self.delta_var.get()
-        delta = aggregate.recent_delta(
-            selected, datetime.now(timezone.utc), aggregate.delta_seconds(win), mode
-        )
+        delta = aggregate.recent_delta(selected, now, aggregate.delta_seconds(win), mode)
         self.delta_label.config(
             text=f"+{fmt_cost(delta)} ({win})",
-            fg="#7ec699" if delta > 0 else "#777777",
+            fg=_COST_BASE if delta > 0 else _DIM,
         )
+
+        # "Currently on" dot + per-turn flash, both keyed off the newest record.
+        newest = aggregate.latest_record(records)
+        self._update_model_dot(newest.model if newest else None)
+        if newest is not None and newest.message_id != self._last_msg_id:
+            if self._last_msg_id is not None:  # don't flash on first load
+                turn_cost = pricing.cost_for(
+                    newest.model, newest.input, newest.output,
+                    newest.cache_creation, newest.cache_read, mode,
+                )
+                self._flash_turn(turn_cost)
+            self._last_msg_id = newest.message_id
+
+        # Pulse the cost number when recent burn is in the top heat bucket.
+        burn = aggregate.recent_delta(records, now, heat.COLOR_WINDOW_SECONDS, mode)
+        self._hot = heat.bucket(burn) >= HOT_BUCKET
+
+        self._draw_sparkline(sparkline.bucketize(
+            records, now, self.cfg.get("spark_range", "24h"), mode))
+
         self.status_label.config(text=f"● updated {datetime.now().strftime('%H:%M:%S')}")
 
     @staticmethod
@@ -253,6 +393,7 @@ class UsageMonitorApp:
 
     def run(self):
         self.root.after(0, self._tick)
+        self.root.after(90, self._pulse_step)  # continuous; only glows when hot
         self.root.mainloop()
 
 
