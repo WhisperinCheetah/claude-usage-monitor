@@ -31,8 +31,13 @@ its dock icon and choose **Pin to Dash** to keep it on the bar.
 entry. The indicator sits at the top-right of the GNOME panel, shows the cost
 for the configured timeframe as its label (updating every few seconds — at
 message-completion granularity, see below), and its menu lets you switch
-timeframe, open the full window, or quit. It starts automatically at next
-login; to start it now:
+timeframe, open the full window, or quit.
+
+- **Scroll** over the icon to cycle the timeframe.
+- **Show recent delta** (menu item, or **middle-click** the icon) flips the
+  label between the timeframe total and the recent-spend delta.
+
+It starts automatically at next login; to start it now:
 
 ```bash
 python3 run_tray.py &

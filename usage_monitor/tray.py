@@ -19,7 +19,7 @@ try:
 except (ValueError, ImportError):  # older systems
     gi.require_version("AppIndicator3", "0.1")
     from gi.repository import AppIndicator3 as AppIndicator
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from usage_monitor import aggregate, config, heat, transcripts  # noqa: E402
 from usage_monitor.format import fmt_cost  # noqa: E402
@@ -53,7 +53,12 @@ class TrayApp:
         self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         self.indicator.set_label("…", _LABEL_GUIDE)
 
+        # Scroll the icon to cycle timeframe.
+        self.indicator.connect("scroll-event", self._on_scroll)
+
         self._build_menu()
+        # Middle-click activates the delta toggle (AppIndicator secondary action).
+        self.indicator.set_secondary_activate_target(self.delta_item)
         self.refresh()
         GLib.timeout_add_seconds(REFRESH_SECONDS, self._tick)
 
@@ -75,9 +80,11 @@ class TrayApp:
         menu.append(Gtk.SeparatorMenuItem())
 
         # Timeframe radio submenu — controls what the top-bar number reflects.
+        # (Also changeable by scrolling the icon.)
         tf_parent = Gtk.MenuItem(label="Timeframe")
         tf_menu = Gtk.Menu()
         first = None
+        self._tf_items = {}
         for key, label in aggregate.TIMEFRAMES:
             item = Gtk.RadioMenuItem.new_with_label_from_widget(first, label)
             if first is None:
@@ -85,9 +92,16 @@ class TrayApp:
             if key == self.cfg["timeframe"]:
                 item.set_active(True)  # set before connect so it doesn't fire early
             item.connect("toggled", self._on_timeframe, key)
+            self._tf_items[key] = item
             tf_menu.append(item)
         tf_parent.set_submenu(tf_menu)
         menu.append(tf_parent)
+
+        # Toggle the label between total and the recent delta (also middle-click).
+        self.delta_item = Gtk.CheckMenuItem(label="Show recent delta")
+        self.delta_item.set_active(bool(self.cfg.get("tray_show_delta", False)))
+        self.delta_item.connect("toggled", self._on_toggle_delta)
+        menu.append(self.delta_item)
 
         open_item = Gtk.MenuItem(label="Open monitor window")
         open_item.connect("activate", self._open_window)
@@ -105,6 +119,24 @@ class TrayApp:
         if not item.get_active():
             return
         self.cfg["timeframe"] = key
+        self.cfg["delta_window"] = aggregate.delta_default(key)  # scale, like the widget
+        config.save_config(self.config_file, self.cfg)
+        self.refresh()
+
+    def _on_scroll(self, _indicator, _steps, direction):
+        keys = [k for k, _ in aggregate.TIMEFRAMES]
+        cur = self.cfg.get("timeframe", keys[0])
+        i = keys.index(cur) if cur in keys else 0
+        if direction == Gdk.ScrollDirection.UP:
+            i = (i - 1) % len(keys)
+        elif direction == Gdk.ScrollDirection.DOWN:
+            i = (i + 1) % len(keys)
+        else:
+            return  # ignore left/right/smooth
+        self._tf_items[keys[i]].set_active(True)  # fires _on_timeframe
+
+    def _on_toggle_delta(self, item):
+        self.cfg["tray_show_delta"] = item.get_active()
         config.save_config(self.config_file, self.cfg)
         self.refresh()
 
@@ -133,7 +165,10 @@ class TrayApp:
             win = aggregate.delta_default(tf)
         delta = aggregate.recent_delta(selected, now, aggregate.delta_seconds(win), mode)
 
-        self.indicator.set_label(fmt_cost(total), _LABEL_GUIDE)
+        if self.cfg.get("tray_show_delta"):
+            self.indicator.set_label(f"+{fmt_cost(delta)}", _LABEL_GUIDE)
+        else:
+            self.indicator.set_label(fmt_cost(total), _LABEL_GUIDE)
         tf_label = dict(aggregate.TIMEFRAMES).get(tf, tf)
         self.header_item.set_label(
             f"{tf_label}: {fmt_cost(total)}    +{fmt_cost(delta)} ({win})"
