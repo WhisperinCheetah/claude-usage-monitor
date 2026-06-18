@@ -1,42 +1,49 @@
 # claude-usage-monitor
 
 A super-lightweight, always-on-top desktop widget that reads your local Claude
-Code transcripts (`~/.claude/projects/**/*.jsonl`) and shows token usage plus
-the estimated pay-as-you-go Anthropic API cost — i.e. what the same usage would
-cost without a subscription.
+Code transcripts and shows **token usage + estimated pay-as-you-go API cost** —
+i.e. what your usage *would* cost on the Anthropic API without a subscription.
 
-Pure Python standard library. No dependencies, no build step, no network.
+Pure Python standard library: no third-party dependencies, no build step, no
+network. All data comes from `~/.claude/projects/**/*.jsonl` on your own machine.
 
-## Run
+```
+┌─ Claude Usage ───────────────────────┐
+│ ● Opus                      +$0.38    │
+│ Tokens   12.4M                        │
+│ Cost     $58.91   +$2.10 (5m)         │
+│ Opus $54 · Sonnet $4 · Haiku $0.27    │
+│ ▁▂▅▃▇▆█▄▂▁  24h                       │
+│ ● updated 14:32                       │
+│ [This month ▾]  [24h ▾]  [Accurate ▾] │
+└───────────────────────────────────────┘
+```
+
+## Installation
+
+**Requirements:** Python 3.8+ with `tkinter` (bundled with most Python installs;
+on Linux `sudo apt install python3-tk` if missing). No other dependencies for the
+widget. The Linux top-bar tray additionally needs PyGObject + AppIndicator
+(see [Linux tray](#top-bar-indicator-linux-only)).
+
+### Quick start (any OS)
 
 ```bash
-python3 run.py
+python3 run.py        # macOS / Linux
+pythonw run.py        # Windows (no console window)
 ```
 
-## Platform support
+### Linux (GNOME)
 
-| | Widget (`run.py`) | Launcher / login item | Top-bar tray |
-|---|---|---|---|
-| **Linux (GNOME)** | yes (frameless) | `install.sh` | yes (`run_tray.py`) |
-| **Windows** | yes (frameless) | `install_windows.ps1` | — |
-| **macOS** | yes (titled window) | `install_macos.sh` | — |
+Register a clickable launcher and the top-bar indicator (per-user, no root):
 
-The widget core is pure-stdlib Python and runs on all three. On macOS the window
-uses a normal title bar (borderless windows are unreliable on Aqua) and
-right-click is mapped to the correct mouse button automatically. The GNOME
-top-bar tray is Linux-only. Settings are stored in the OS-native config dir
-(`~/.config` on Linux, `~/Library/Application Support` on macOS, `%APPDATA%` on
-Windows).
-
-### Windows
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install_windows.ps1
+```bash
+./install.sh
 ```
 
-Creates Start Menu and Startup shortcuts that launch via `pythonw.exe` (no
-console window). Remove with `.\uninstall_windows.ps1`. Or just run
-`pythonw run.py`.
+Then open the Activities overview, search **Claude Usage Monitor**, and launch
+it (right-click its dock icon → **Pin to Dash** to keep it handy). Remove with
+`./uninstall.sh`.
 
 ### macOS
 
@@ -44,99 +51,131 @@ console window). Remove with `.\uninstall_windows.ps1`. Or just run
 ./install_macos.sh
 ```
 
-Installs a `Claude Usage Monitor.app` in `~/Applications` and a login item.
-Remove with `./uninstall_macos.sh`. Or just run `python3 run.py` (use a
-python.org build for a working Tk 8.6).
+Installs `Claude Usage Monitor.app` in `~/Applications` plus a login item.
+Remove with `./uninstall_macos.sh`. Tip: use a [python.org](https://python.org)
+build for a working Tk 8.6.
 
-## Desktop launcher (Ubuntu / GNOME)
+### Windows
 
-Register a clickable launcher (per-user, no root):
-
-```bash
-./install.sh
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install_windows.ps1
 ```
 
-This installs `.desktop` entries and an icon under `~/.local`. Open the
-Activities overview, search **Claude Usage Monitor**, and launch it; right-click
-its dock icon and choose **Pin to Dash** to keep it on the bar.
+Creates Start Menu and Startup shortcuts that launch via `pythonw.exe`. Remove
+with `.\uninstall_windows.ps1`.
 
-### Top-bar indicator
+### Platform support at a glance
 
-`install.sh` also registers a top-bar (AppIndicator) entry and an autostart
-entry. The indicator sits at the top-right of the GNOME panel, shows the cost
-for the configured timeframe as its label (updating every few seconds — at
-message-completion granularity, see below), and its menu lets you switch
-timeframe, open the full window, or quit.
+| | Widget (`run.py`) | Launcher / login item | Top-bar tray |
+|---|---|---|---|
+| **Linux (GNOME)** | yes (frameless) | `install.sh` | yes (`run_tray.py`) |
+| **macOS** | yes (titled window) | `install_macos.sh` | — |
+| **Windows** | yes (frameless) | `install_windows.ps1` | — |
 
-- **Scroll** over the icon to cycle the timeframe.
-- **Show recent delta** (menu item, or **middle-click** the icon) flips the
-  label between the timeframe total and the recent-spend delta.
+On macOS the window uses a normal title bar (borderless windows are unreliable
+on Aqua); the right-click button is selected automatically per platform.
 
-It starts automatically at next login; to start it now:
+## Features
+
+- **Real-cost estimate.** Per-model token usage priced at public API rates,
+  including prompt-cache rates (writes 1.25×, reads 0.1× of input).
+- **Timeframes.** Current session, Today, This week (from Monday), Last 7 days,
+  This month, All-time.
+- **Two cost methods.** *Accurate* (cache discounts applied) or *Simple* (all
+  input-side tokens at the flat input rate).
+- **Recent-spend delta.** A stock-ticker `+$x.xx (window)` next to the cost;
+  the window scales with the timeframe (`5m/10m/30m/60m` always available,
+  larger ranges added for longer timeframes).
+- **Sparkline.** A bar chart of recent cost — click to cycle `1h / 24h / 7d / 30d`.
+- **Live touches.** Cost number rolls to its new value, pulses green when you're
+  burning hard, and each completed turn flashes its own cost. A `●` dot shows
+  which model your latest message used.
+- **Always on top**, draggable, with a **semi-transparent** toggle.
+- **Linux top-bar indicator** with a cost label color-coded by recent activity.
+
+## Usage
+
+- **Drag** the body to move the window.
+- **Right-click** (Control-click on macOS) for a menu: toggle **Semi-transparent**
+  or quit.
+- **Click the sparkline** to cycle its range.
+- The dropdowns at the bottom select timeframe, delta window, and cost method.
+- Position, timeframe, mode, transparency, and sparkline range persist between
+  runs (see [Configuration](#configuration)).
+
+### Top-bar indicator (Linux only)
+
+`install.sh` also registers a GNOME AppIndicator and an autostart entry. The
+indicator shows the cost for the configured timeframe and is **color-coded** by
+recent activity (gray when idle → vivid green at ~$6 spent in the last 10 min).
+
+- **Scroll** the icon to cycle the timeframe.
+- **Show recent delta** (menu item, or **middle-click**) flips the label between
+  the timeframe total and the recent delta.
+- Its menu opens the full window, switches timeframe, or quits.
+
+Start it now without re-logging in:
 
 ```bash
 python3 run_tray.py &
 ```
 
-The indicator icon is **color-coded by recent activity**: gray when idle,
-ramping to vivid green as spend over the last 10 minutes rises, fully green at
-about $6 in that window. Tune the window and scale via `COLOR_WINDOW_SECONDS` /
-`COLOR_MAX_SPEND` in `usage_monitor/heat.py`. (The color always reflects this
-fixed window, independent of the timeframe shown in the label.)
-
-Requires PyGObject + AppIndicator, which ship with Ubuntu GNOME. If missing:
+Needs PyGObject + AppIndicator, which ship with Ubuntu GNOME. If missing:
 
 ```bash
 sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
 ```
 
-Remove everything (launchers, autostart, icon) with:
+## Configuration
 
-```bash
-./uninstall.sh
-```
+Settings are stored as JSON in the OS-native config directory:
 
-### A note on "live" cost
-
-Claude Code writes token usage to its transcripts only when an assistant
-message *completes*, so the figures update per message (every few seconds
-during an agentic task with many tool calls), not token-by-token within a
-single streaming response. True mid-generation cost isn't observable from
-outside Claude Code.
-
-## Use
-
-- **Timeframe dropdown:** Current session, Today, This week (from Monday),
-  Last 7 days, This month, All-time.
-- **Cost dropdown:** Accurate (cache writes at 1.25×, reads at 0.1× input) or
-  Simple (all input-side tokens at the flat input rate).
-- **Delta:** a stock-ticker-style `+$x.xx (window)` next to the cost shows how
-  much was spent in the most recent window. The window dropdown's choices and
-  default scale with the timeframe — `5m / 10m / 30m / 60m` are always
-  available; larger timeframes also offer `6h / 24h / 7d / 30d`. Switching the
-  timeframe resets the window to that timeframe's default.
-- A **`●` model dot** (top-left) shows which model your most recent message
-  used; the **cost number rolls** up/down when it changes and **pulses** green
-  while recent burn is high; each completed turn briefly **flashes** its own
-  cost (top-right, green fading to grey).
-- A **sparkline** of recent cost sits below the figures — **click it** to cycle
-  the range (1h / 24h / 7d / 30d).
-- Drag the body to move it. **Right-click** for a menu to toggle
-  **Semi-transparent** (see-through but readable) or quit.
-- Position, timeframe, mode, transparency, and sparkline range are remembered
-  in `~/.config/claude-usage-monitor/config.json`.
+| OS | Location |
+|---|---|
+| Linux | `~/.config/claude-usage-monitor/` |
+| macOS | `~/Library/Application Support/claude-usage-monitor/` |
+| Windows | `%APPDATA%\claude-usage-monitor\` |
 
 ## Pricing
 
 Per-1M-token rates live in `usage_monitor/pricing.json` (model rates, fallback
-model, cache multipliers) — edit that file when prices change, no code edit
-needed. To customize without touching the repo, drop your own
-`~/.config/claude-usage-monitor/pricing.json` (same shape); it overrides the
-bundled defaults. Unknown models fall back to the configured fallback model so
-cost is never silently zero.
+model, cache multipliers) — edit it when prices change, no code edit needed. To
+customize without touching the repo, drop your own `pricing.json` (same shape)
+in the config directory above; it overrides the bundled defaults. Unknown models
+fall back to the configured fallback model, so cost is never silently zero.
+
+Tray color thresholds (`COLOR_WINDOW_SECONDS`, `COLOR_MAX_SPEND`) and the
+pulse/heat tuning live in `usage_monitor/heat.py`.
+
+## How "live" is the cost?
+
+Claude Code writes token usage to its transcripts only when an assistant message
+**completes**, so the figures update per message — every few seconds during an
+agentic task with many tool calls, but not token-by-token within a single
+streaming response. True mid-generation cost isn't observable from outside
+Claude Code.
 
 ## Tests
 
 ```bash
 python3 -m unittest discover -s tests -v
+```
+
+## Project layout
+
+```
+usage_monitor/
+  pricing.py      cost engine + pricing.json loader      (pure)
+  transcripts.py  discover/parse JSONL, dedup, mtime cache (pure)
+  aggregate.py    timeframes, rollups, deltas             (pure)
+  sparkline.py    time-bucketed cost series               (pure)
+  heat.py         recent-burn -> gray/green color + icon   (pure)
+  format.py       token/cost formatting                   (pure)
+  config.py       settings load/save
+  paths.py        OS-native config directory
+  app.py          Tkinter widget + animations
+  tray.py         GNOME AppIndicator (Linux)
+run.py            launch the widget
+run_tray.py       launch the tray indicator (Linux)
+install*.{sh,ps1} per-OS launchers
 ```
