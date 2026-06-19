@@ -30,6 +30,19 @@ _FLASH_GREY = "#8a8a8a"
 _DIM = "#777777"
 
 
+def clamp_to_screen(x, y, win_w, win_h, screen_w, screen_h):
+    """Keep a window fully on-screen.
+
+    A saved position can become invalid when the monitor layout changes (e.g.
+    an external display is unplugged), leaving the widget rendering off-screen
+    and seemingly "not starting". Clamp the restored position so the whole
+    window stays within the virtual screen.
+    """
+    max_x = max(0, screen_w - win_w)
+    max_y = max(0, screen_h - win_h)
+    return min(max(x, 0), max_x), min(max(y, 0), max_y)
+
+
 def _hex_rgb(h):
     h = h.lstrip("#")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -69,7 +82,11 @@ class UsageMonitorApp:
         self.root.pack_propagate(False)  # fixed size — content never resizes the window
         geo = f"{WINDOW_W}x{WINDOW_H}"
         if self.cfg.get("x") is not None and self.cfg.get("y") is not None:
-            geo += f"+{self.cfg['x']}+{self.cfg['y']}"
+            x, y = clamp_to_screen(
+                self.cfg["x"], self.cfg["y"], WINDOW_W, WINDOW_H,
+                self.root.winfo_screenwidth(), self.root.winfo_screenheight(),
+            )
+            geo += f"+{x}+{y}"
         self.root.geometry(geo)
 
         self._translucent = bool(self.cfg.get("translucent", False))
