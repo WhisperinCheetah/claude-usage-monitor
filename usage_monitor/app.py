@@ -1,5 +1,7 @@
 """Always-on-top Tkinter widget showing Claude token usage and estimated cost."""
 import math
+import re
+import subprocess
 import tkinter as tk
 from datetime import datetime, timezone
 
@@ -30,17 +32,57 @@ _FLASH_GREY = "#8a8a8a"
 _DIM = "#777777"
 
 
-def clamp_to_screen(x, y, win_w, win_h, screen_w, screen_h):
-    """Keep a window fully on-screen.
+def _clamp_into_rect(x, y, win_w, win_h, rx, ry, rw, rh):
+    """Clamp (x, y) so a win_w x win_h window sits fully inside one rectangle."""
+    max_x = rx + max(0, rw - win_w)
+    max_y = ry + max(0, rh - win_h)
+    return min(max(x, rx), max_x), min(max(y, ry), max_y)
 
-    A saved position can become invalid when the monitor layout changes (e.g.
-    an external display is unplugged), leaving the widget rendering off-screen
-    and seemingly "not starting". Clamp the restored position so the whole
-    window stays within the virtual screen.
+
+def clamp_to_screen(x, y, win_w, win_h, screen_w, screen_h):
+    """Keep a window fully within a single screen rectangle anchored at 0,0."""
+    return _clamp_into_rect(x, y, win_w, win_h, 0, 0, screen_w, screen_h)
+
+
+def parse_xrandr_monitors(text):
+    """Parse `xrandr --listmonitors` into a list of (x, y, w, h) rectangles.
+
+    Each monitor line carries a geometry token like ``1920/477x1080/268+1920+507``
+    (width/mm x height/mm + x + y). Returns [] if nothing parses.
     """
-    max_x = max(0, screen_w - win_w)
-    max_y = max(0, screen_h - win_h)
-    return min(max(x, 0), max_x), min(max(y, 0), max_y)
+    rects = []
+    for m in re.finditer(r"(\d+)/\d+x(\d+)/\d+\+(\d+)\+(\d+)", text):
+        w, h, x, y = (int(g) for g in m.groups())
+        rects.append((x, y, w, h))
+    return rects
+
+
+def clamp_to_monitors(x, y, win_w, win_h, monitors):
+    """Keep a window fully within a real monitor.
+
+    A saved position can become invalid when the monitor layout changes (an
+    external display unplugged or moved), leaving the widget off-screen and
+    seemingly "not starting". The virtual-screen bounding box isn't enough:
+    monitors at different offsets leave dead zones with no physical display.
+    So clamp into the monitor that contains the point, else the nearest one.
+
+    `monitors` is a list of (x, y, w, h). Returns the input unchanged when no
+    monitor info is available (best-effort fallback for the caller).
+    """
+    if not monitors:
+        return x, y
+
+    def contains(m):
+        mx, my, mw, mh = m
+        return mx <= x < mx + mw and my <= y < my + mh
+
+    chosen = next((m for m in monitors if contains(m)), None)
+    if chosen is None:
+        def dist2(m):
+            mx, my, mw, mh = m
+            return (mx + mw / 2 - x) ** 2 + (my + mh / 2 - y) ** 2
+        chosen = min(monitors, key=dist2)
+    return _clamp_into_rect(x, y, win_w, win_h, *chosen)
 
 
 def _hex_rgb(h):
@@ -82,9 +124,9 @@ class UsageMonitorApp:
         self.root.pack_propagate(False)  # fixed size — content never resizes the window
         geo = f"{WINDOW_W}x{WINDOW_H}"
         if self.cfg.get("x") is not None and self.cfg.get("y") is not None:
-            x, y = clamp_to_screen(
+            x, y = clamp_to_monitors(
                 self.cfg["x"], self.cfg["y"], WINDOW_W, WINDOW_H,
-                self.root.winfo_screenwidth(), self.root.winfo_screenheight(),
+                self._monitor_rects(),
             )
             geo += f"+{x}+{y}"
         self.root.geometry(geo)
@@ -106,6 +148,26 @@ class UsageMonitorApp:
         self._build_context_menu()
         self._bind_drag()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _monitor_rects(self):
+        """Real monitor rectangles, falling back to the whole virtual screen.
+
+        On X11 the bounding box can contain dead zones between offset monitors,
+        so ask xrandr for the actual rectangles. Other platforms (and any
+        failure) fall back to a single screen-sized rectangle.
+        """
+        if self._winsys == "x11":
+            try:
+                out = subprocess.run(
+                    ["xrandr", "--listmonitors"],
+                    capture_output=True, text=True, timeout=2,
+                ).stdout
+                rects = parse_xrandr_monitors(out)
+                if rects:
+                    return rects
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return [(0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())]
 
     def _label(self, parent, text, **kw):
         opts = dict(bg="#1e1e1e", fg="#dddddd", font=("TkDefaultFont", 10))
