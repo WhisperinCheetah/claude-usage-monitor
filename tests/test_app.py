@@ -1,8 +1,10 @@
 import unittest
 
 from usage_monitor.app import (
+    _heartbeat_intensities,
     clamp_to_monitors,
     clamp_to_screen,
+    flash_intensity,
     parse_xrandr_monitors,
 )
 
@@ -67,6 +69,35 @@ class TestClampToMonitors(unittest.TestCase):
 
     def test_no_monitors_returns_input_unchanged(self):
         self.assertEqual(clamp_to_monitors(4085, 50, 384, 206, []), (4085, 50))
+
+
+class TestFlashIntensity(unittest.TestCase):
+    def test_zero_cost_is_zero(self):
+        self.assertEqual(flash_intensity(0.0, 0.25), 0.0)
+
+    def test_negative_cost_is_zero(self):
+        self.assertEqual(flash_intensity(-1.0, 0.25), 0.0)
+
+    def test_half_of_full_is_half(self):
+        self.assertAlmostEqual(flash_intensity(0.125, 0.25), 0.5)
+
+    def test_at_full_is_one(self):
+        self.assertEqual(flash_intensity(0.25, 0.25), 1.0)
+
+    def test_above_full_is_clamped_to_one(self):
+        self.assertEqual(flash_intensity(10.0, 0.25), 1.0)
+
+    def test_zero_or_negative_ceiling_is_zero(self):
+        self.assertEqual(flash_intensity(1.0, 0.0), 0.0)
+        self.assertEqual(flash_intensity(1.0, -0.5), 0.0)
+
+
+class TestHeartbeat(unittest.TestCase):
+    def test_each_beat_peaks_at_one_and_settles_at_zero(self):
+        seq = _heartbeat_intensities(2)
+        self.assertEqual(seq[-1], 0.0)
+        self.assertEqual(seq.count(1.0), 2)  # one peak per beat
+        self.assertTrue(all(0.0 <= t <= 1.0 for t in seq))
 
 
 if __name__ == "__main__":

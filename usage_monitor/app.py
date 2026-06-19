@@ -5,7 +5,7 @@ import subprocess
 import tkinter as tk
 from datetime import datetime, timezone
 
-from usage_monitor import aggregate, config, heat, pricing, sparkline, transcripts
+from usage_monitor import aggregate, config, heat, pricing, sparkline, status, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
 
 REFRESH_MS = 3000
@@ -27,9 +27,35 @@ _MODEL_COLORS = {
 }
 _COST_BASE = "#7ec699"   # normal cost-number color
 _COST_HOT = "#caf7d8"    # peak of the "hot" pulse
-_FLASH_GREEN = "#7ee787"
+_COST_BURST = "#ffffff"  # peak of a per-turn "heartbeat" burst on a pricey turn
+_FLASH_GREEN = "#7ee787"  # cheap-turn flash peak
+_FLASH_HOT = "#ffffff"    # expensive-turn flash peak (white-hot)
 _FLASH_GREY = "#8a8a8a"
 _DIM = "#777777"
+
+# Cost-scaled flash tuning.
+_FLASH_BASE_PT = 9       # idle/cheap flash font size
+_FLASH_MAX_BUMP = 5      # extra points added to the flash text at full intensity
+_FLASH_MIN_STEPS = 8     # fade steps for a cheap turn
+_FLASH_MAX_STEPS = 22    # fade steps for a full-burn turn (lingers longer)
+_BURST_THRESHOLD = 0.6   # intensity at/above which the cost total throbs
+_BURST_STEP_MS = 55      # frame time for the heartbeat burst
+
+
+def flash_intensity(cost, full_cost):
+    """Map a turn's cost to 0..1 flash intensity against the full-burn ceiling."""
+    if not full_cost or full_cost <= 0 or cost <= 0:
+        return 0.0
+    return max(0.0, min(cost / full_cost, 1.0))
+
+
+def _heartbeat_intensities(beats):
+    """Throb shape for `beats` heartbeats: rise to 1, fall back, repeat, settle."""
+    seq = []
+    for _ in range(beats):
+        seq += [0.0, 0.55, 1.0, 0.5, 0.15]
+    seq.append(0.0)
+    return seq
 
 
 def _clamp_into_rect(x, y, win_w, win_h, rx, ry, rw, rh):
@@ -130,10 +156,6 @@ def _blend(a, b, t):
     return f"#{round(ar+(br-ar)*t):02x}{round(ag+(bg-ag)*t):02x}{round(ab+(bb-ab)*t):02x}"
 
 
-def _flash_sequence(n=10):
-    return [_blend(_FLASH_GREEN, _FLASH_GREY, i / (n - 1)) for i in range(n)]
-
-
 class UsageMonitorApp:
     def __init__(self, projects_dir=None, config_file=None):
         self.projects_dir = projects_dir or transcripts.default_projects_dir()
@@ -174,8 +196,18 @@ class UsageMonitorApp:
         self._last_msg_id = None         # for "cost of that answer" flash
         self._hot = False                # recent burn in the top bucket -> pulse
         self._pulse_phase = 0.0
-        self._flash_seq = _flash_sequence()
-        self._flash_idx = len(self._flash_seq)  # idle
+        self._flash_seq = []             # per-turn fade colors (built on each flash)
+        self._flash_idx = 0              # index into _flash_seq; >= len means idle
+        self._flash_sizes = []           # font sizes paired with _flash_seq
+
+        # "Responding now" dot state (fed by usage_monitor.status).
+        self._responding = False
+        self._model_norm = None          # normalized model of the newest record
+        self._dot_phase = 0.0            # shimmer phase for the responding dot
+
+        # Per-turn "heartbeat" burst on a pricey turn (overrides the hot pulse).
+        self._burst_seq = []
+        self._burst_idx = 0
 
         self._build_widgets()
         self._build_context_menu()
@@ -346,35 +378,78 @@ class UsageMonitorApp:
         if self._cost_animating:
             self.root.after(30, self._cost_tick)
 
-    def _flash_turn(self, cost):
-        """Subtle per-turn flash: bright green fading to grey, then it lingers."""
-        self.flash_label.config(text=f"+{fmt_cost(cost)}", fg=self._flash_seq[0])
+    def _flash_turn(self, cost, intensity):
+        """Per-turn flash, scaled to cost: pricier turns flash hotter, bigger,
+        and linger longer; a big enough turn also throbs the cost total."""
+        intensity = max(0.0, min(intensity, 1.0))
+        peak = _blend(_FLASH_GREEN, _FLASH_HOT, intensity)
+        n = round(_FLASH_MIN_STEPS + (_FLASH_MAX_STEPS - _FLASH_MIN_STEPS) * intensity)
+        peak_pt = _FLASH_BASE_PT + round(_FLASH_MAX_BUMP * intensity)
+        self._flash_seq = [_blend(peak, _FLASH_GREY, i / (n - 1)) for i in range(n)]
+        # Font eases from the (bumped) peak back down to the base over the fade.
+        self._flash_sizes = [
+            round(peak_pt - (peak_pt - _FLASH_BASE_PT) * (i / (n - 1))) for i in range(n)
+        ]
+        self.flash_label.config(text=f"+{fmt_cost(cost)}", fg=self._flash_seq[0],
+                                font=("TkDefaultFont", self._flash_sizes[0], "bold"))
         self._flash_idx = 1
         self.root.after(110, self._flash_step)
+        if intensity >= _BURST_THRESHOLD:
+            self._start_burst(beats=3 if intensity >= 0.85 else 2)
 
     def _flash_step(self):
         if self._flash_idx >= len(self._flash_seq):
             return  # stays at the final grey
-        self.flash_label.config(fg=self._flash_seq[self._flash_idx])
+        self.flash_label.config(fg=self._flash_seq[self._flash_idx],
+                                font=("TkDefaultFont", self._flash_sizes[self._flash_idx], "bold"))
         self._flash_idx += 1
         self.root.after(110, self._flash_step)
 
+    def _start_burst(self, beats):
+        self._burst_seq = _heartbeat_intensities(beats)
+        self._burst_idx = 0
+        self._burst_step()
+
+    def _burst_step(self):
+        if self._burst_idx >= len(self._burst_seq):
+            self._burst_seq = []  # hand the cost color back to _pulse_step
+            return
+        t = self._burst_seq[self._burst_idx]
+        self.cost_label.config(fg=_blend(_COST_BASE, _COST_BURST, t))
+        self._burst_idx += 1
+        self.root.after(_BURST_STEP_MS, self._burst_step)
+
     def _pulse_step(self):
-        if self._hot:
-            self._pulse_phase += 0.20
-            t = (math.sin(self._pulse_phase) + 1) / 2
-            self.cost_label.config(fg=_blend(_COST_BASE, _COST_HOT, t))
-        else:
-            self.cost_label.config(fg=_COST_BASE)
+        # A heartbeat burst temporarily owns the cost-number color.
+        if not self._burst_seq:
+            if self._hot:
+                self._pulse_phase += 0.20
+                t = (math.sin(self._pulse_phase) + 1) / 2
+                self.cost_label.config(fg=_blend(_COST_BASE, _COST_HOT, t))
+            else:
+                self.cost_label.config(fg=_COST_BASE)
+        if self._responding:
+            self._dot_phase += 0.30
+        self._render_dot()
         self.root.after(90, self._pulse_step)
 
     def _update_model_dot(self, model):
-        if not model:
+        self._model_norm = pricing.normalize_model(model) if model else None
+        self._render_dot()
+
+    def _render_dot(self):
+        """Draw the top-left "currently on" dot; shimmers while responding."""
+        if self._model_norm is None:
             self.model_label.config(text="● —", fg=_DIM)
             return
-        norm = pricing.normalize_model(model)
-        short = _MODEL_SHORT.get(norm, norm)
-        self.model_label.config(text=f"● {short}", fg=_MODEL_COLORS.get(norm, "#aaaaaa"))
+        short = _MODEL_SHORT.get(self._model_norm, self._model_norm)
+        base = _MODEL_COLORS.get(self._model_norm, "#aaaaaa")
+        if self._responding:
+            t = (math.sin(self._dot_phase) + 1) / 2
+            self.model_label.config(text=f"● {short} ⚡ responding",
+                                    fg=_blend("#3a3a3a", base, 0.35 + 0.65 * t))
+        else:
+            self.model_label.config(text=f"● {short}", fg=base)
 
     def _draw_sparkline(self, values):
         c = self.spark
@@ -495,6 +570,8 @@ class UsageMonitorApp:
         )
 
         # "Currently on" dot + per-turn flash, both keyed off the newest record.
+        # The live responding/idle state comes from the hook-fed status files.
+        self._responding = status.is_responding(now=now.timestamp())
         newest = aggregate.latest_record(records)
         self._update_model_dot(newest.model if newest else None)
         if newest is not None and newest.message_id != self._last_msg_id:
@@ -503,7 +580,8 @@ class UsageMonitorApp:
                     newest.model, newest.input, newest.output,
                     newest.cache_creation, newest.cache_read, mode,
                 )
-                self._flash_turn(turn_cost)
+                intensity = flash_intensity(turn_cost, self.cfg.get("flash_full_cost", 0.25))
+                self._flash_turn(turn_cost, intensity)
             self._last_msg_id = newest.message_id
 
         # Pulse the cost number when recent burn is in the top heat bucket.

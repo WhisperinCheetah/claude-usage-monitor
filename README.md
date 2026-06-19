@@ -96,8 +96,12 @@ on Aqua); the right-click button is selected automatically per platform.
   larger ranges added for longer timeframes).
 - **Sparkline.** A bar chart of recent cost — click to cycle `1h / 24h / 7d / 30d`.
 - **Live touches.** Cost number rolls to its new value, pulses green when you're
-  burning hard, and each completed turn flashes its own cost. A `●` dot shows
-  which model your latest message used.
+  burning hard, and each completed turn flashes its own cost — **scaled to how
+  expensive the turn was** (a pricey turn flashes hotter/bigger and throbs the
+  total). A `●` dot shows which model your latest message used.
+- **Responding indicator.** With the optional hooks installed, the top-left dot
+  shimmers `● Opus ⚡ responding` while Claude is actively working a prompt, and
+  goes steady when idle. See [Responding indicator](#responding-indicator-optional).
 - **Always on top**, draggable, with a **semi-transparent** toggle.
 - **Linux top-bar indicator** with a cost label color-coded by recent activity.
 
@@ -124,6 +128,23 @@ Needs PyGObject + AppIndicator, which ship with Ubuntu GNOME. If missing:
 sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1
 ```
 
+## Responding indicator (optional)
+
+The monitor reads *completed* messages, which can't tell you when Claude is
+mid-response. Claude Code **hooks** can. Install them once:
+
+```bash
+python3 -m usage_monitor.install_hooks      # remove with --uninstall
+```
+
+This patches `~/.claude/settings.json` (idempotently, preserving any existing
+hooks) so each session writes a tiny status file to
+`~/.claude/usage-monitor/status/` on prompt submit (responding) and stop (idle).
+The widget polls those files; the top-left dot shimmers `⚡ responding` while a
+turn is in flight. Restart running Claude Code sessions for the hooks to take
+effect. A crashed session decays back to "idle" automatically after a few
+minutes, so the indicator never gets stuck on.
+
 ## Configuration
 
 Settings are stored as JSON in the OS-native config directory:
@@ -133,6 +154,9 @@ Settings are stored as JSON in the OS-native config directory:
 | Linux | `~/.config/claude-usage-monitor/` |
 | macOS | `~/Library/Application Support/claude-usage-monitor/` |
 | Windows | `%APPDATA%\claude-usage-monitor\` |
+
+`flash_full_cost` (default `0.25`) sets the per-turn dollar amount that maxes out
+the cost-flash intensity — lower it to make flashes pop on cheaper turns.
 
 ## Pricing
 
@@ -169,10 +193,14 @@ usage_monitor/
   sparkline.py    time-bucketed cost series               (pure)
   heat.py         recent-burn -> gray/green color + icon   (pure)
   format.py       token/cost formatting                   (pure)
+  status.py       hook-fed "responding now" signal         (pure)
   config.py       settings load/save
   paths.py        OS-native config directory
   app.py          Tkinter widget + animations
   tray.py         GNOME AppIndicator (Linux)
+  install_hooks.py  patch ~/.claude/settings.json with the hooks
+  hooks/
+    status_hook.py  records responding/idle per session (run by Claude Code)
 run.py            launch the widget
 run_tray.py       launch the tray indicator (Linux)
 install*.{sh,ps1} per-OS launchers
