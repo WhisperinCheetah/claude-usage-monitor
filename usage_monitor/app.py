@@ -57,6 +57,21 @@ def parse_xrandr_monitors(text):
     return rects
 
 
+def _enable_windows_dpi_awareness():
+    """Opt into per-monitor DPI awareness on Windows so the widget isn't blurry.
+
+    No-op on other platforms. Must run before the first Tk window is created.
+    """
+    try:
+        import ctypes
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # per-monitor (Win 8.1+)
+        except (OSError, AttributeError):
+            ctypes.windll.user32.SetProcessDPIAware()        # system DPI (Vista+)
+    except (OSError, AttributeError):
+        pass  # not Windows, or the call is unavailable
+
+
 def _windows_virtual_screen():
     """Bounding rect (x, y, w, h) of the whole Windows virtual desktop, or None.
 
@@ -395,7 +410,10 @@ class UsageMonitorApp:
         self._ctx.add_command(label="Quit", command=self._on_close)
 
     def _show_context_menu(self, event):
-        self._ctx.tk_popup(event.x_root, event.y_root)
+        try:
+            self._ctx.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._ctx.grab_release()  # release the input grab so the menu dismisses
 
     def _toggle_opacity(self):
         self._translucent = self._translucent_var.get()
@@ -518,4 +536,5 @@ class UsageMonitorApp:
 
 
 def main():
+    _enable_windows_dpi_awareness()  # before any Tk window is created
     UsageMonitorApp().run()
