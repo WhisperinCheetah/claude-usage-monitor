@@ -6,6 +6,7 @@ from usage_monitor.app import (
     clamp_to_screen,
     flash_intensity,
     parse_xrandr_monitors,
+    turn_flash_decision,
 )
 
 
@@ -90,6 +91,40 @@ class TestFlashIntensity(unittest.TestCase):
     def test_zero_or_negative_ceiling_is_zero(self):
         self.assertEqual(flash_intensity(1.0, 0.0), 0.0)
         self.assertEqual(flash_intensity(1.0, -0.5), 0.0)
+
+
+class TestTurnFlashDecision(unittest.TestCase):
+    def test_turn_start_banks_anchor_and_does_not_flash(self):
+        # idle -> responding: remember pre-turn total (10.0), no flash yet.
+        cost, anchor = turn_flash_decision(10.0, 10.0, False, True, 0.0)
+        self.assertIsNone(cost)
+        self.assertEqual(anchor, 10.0)
+
+    def test_mid_turn_accumulates_silently(self):
+        # responding -> responding: messages arrived (10 -> 10.4) but no flash.
+        cost, anchor = turn_flash_decision(10.0, 10.4, True, True, 9.0)
+        self.assertIsNone(cost)
+        self.assertEqual(anchor, 9.0)  # anchor unchanged mid-turn
+
+    def test_turn_end_flashes_whole_response_cost(self):
+        # responding -> idle: flash total(12.5) - anchor(10.0) = the turn's cost.
+        cost, _ = turn_flash_decision(12.5, 12.5, True, False, 10.0)
+        self.assertAlmostEqual(cost, 2.5)
+
+    def test_end_sums_many_substeps_into_one_flash(self):
+        # A turn that started at 10.0 and, across several tool steps, reached
+        # 13.2 flashes 3.2 once — not once per step.
+        cost, _ = turn_flash_decision(13.2, 13.2, True, False, 10.0)
+        self.assertAlmostEqual(cost, 3.2)
+
+    def test_fast_turn_between_polls_flashes_delta(self):
+        # idle -> idle but new cost appeared (hookless, or sub-poll turn).
+        cost, _ = turn_flash_decision(10.0, 10.7, False, False, 0.0)
+        self.assertAlmostEqual(cost, 0.7)
+
+    def test_idle_with_no_new_cost_yields_zero(self):
+        cost, _ = turn_flash_decision(10.0, 10.0, False, False, 0.0)
+        self.assertEqual(cost, 0.0)  # caller filters this out
 
 
 class TestHeartbeat(unittest.TestCase):

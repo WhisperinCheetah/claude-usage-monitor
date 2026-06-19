@@ -9,13 +9,14 @@ concurrent sessions never race on a single shared file.
 The monitor reads these files every refresh. A ``responding`` mark only counts
 while it is *fresh* (``FRESHNESS_SECONDS``): if a session crashes without firing
 its ``Stop`` hook the stale mark decays to "not responding" rather than getting
-stuck on forever.
+stuck on forever. The window is generous because a long agentic turn (many tool
+steps) only writes the mark once, at prompt submit — it must outlast the turn.
 """
 import json
 import time
 from pathlib import Path
 
-FRESHNESS_SECONDS = 180  # a "responding" mark older than this is treated as stale
+FRESHNESS_SECONDS = 600  # a "responding" mark older than this is treated as stale
 
 
 def status_dir() -> Path:

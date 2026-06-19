@@ -47,6 +47,33 @@ def flash_intensity(cost, full_cost):
     return max(0.0, min(cost / full_cost, 1.0))
 
 
+def turn_flash_decision(prev_total, total, was_responding, responding, anchor):
+    """Decide the per-*response* cost flash from cumulative cost + responding state.
+
+    A Claude turn writes many assistant messages (one per tool step); we want one
+    flash for the whole response, not one per step. Strategy:
+
+    - turn start (idle -> responding): remember the cost just before it, flash
+      nothing yet;
+    - mid-turn (responding -> responding): accumulate silently;
+    - turn end (responding -> idle): flash the whole turn's cost (total - anchor);
+    - idle -> idle with new cost: a turn that began and ended between two polls,
+      or a session with no hooks installed — flash the delta since last refresh.
+
+    Returns ``(flash_cost_or_None, new_anchor)``. ``flash_cost_or_None`` is None
+    when nothing should flash; otherwise the caller still filters tiny amounts.
+    """
+    started = responding and not was_responding
+    ended = was_responding and not responding
+    if started:
+        return None, prev_total          # bank the pre-turn cost; don't flash yet
+    if ended:
+        return total - anchor, anchor    # the whole response's cost
+    if not responding:
+        return total - prev_total, anchor  # fast turn / no hooks: per-poll delta
+    return None, anchor                  # mid-turn: keep accumulating quietly
+
+
 def _heartbeat_intensities(beats):
     """Throb shape for `beats` heartbeats: rise to 1, fall back, repeat, settle."""
     seq = []
@@ -191,7 +218,12 @@ class UsageMonitorApp:
         self._cost_shown = 0.0           # currently-displayed cost (for roll-up)
         self._cost_target = 0.0
         self._cost_animating = False
-        self._last_msg_id = None         # for "cost of that answer" flash
+        # Per-response flash bookkeeping (see turn_flash_decision): cumulative
+        # cost last seen, cost banked at the current turn's start, and whether
+        # the previous refresh saw a session responding.
+        self._last_total = None          # None until the first refresh baselines it
+        self._turn_anchor = 0.0
+        self._was_responding = False
         self._hot = False                # recent burn in the top bucket -> pulse
         self._pulse_phase = 0.0
         self._flash_seq = []             # per-turn fade colors (built on each flash)
@@ -395,6 +427,29 @@ class UsageMonitorApp:
         self._flash_idx += 1
         self.root.after(110, self._flash_step)
 
+    def _update_turn_flash(self, records, mode):
+        """Flash the +$ cost once per response (not per intermediate message)."""
+        total = aggregate.rollup(records, mode)["total_cost"]
+        if self._last_total is None:          # first load: baseline only, no flash
+            self._last_total = total
+            self._turn_anchor = total
+            self._was_responding = self._responding
+            return
+        cost, self._turn_anchor = turn_flash_decision(
+            self._last_total, total, self._was_responding, self._responding,
+            self._turn_anchor,
+        )
+        if cost is not None:
+            self._flash_cost(cost)
+        self._last_total = total
+        self._was_responding = self._responding
+
+    def _flash_cost(self, turn_cost):
+        if turn_cost <= 0.0005:           # ignore noise / no real new spend
+            return
+        intensity = flash_intensity(turn_cost, self.cfg.get("flash_full_cost", 0.25))
+        self._flash_turn(turn_cost, intensity)
+
     def _start_burst(self, beats):
         self._burst_seq = _heartbeat_intensities(beats)
         self._burst_idx = 0
@@ -559,20 +614,12 @@ class UsageMonitorApp:
             fg=_COST_BASE if delta > 0 else _DIM,
         )
 
-        # "Currently on" dot + per-turn flash, both keyed off the newest record.
+        # "Currently on" dot (newest record) + one cost flash per response.
         # The live responding/idle state comes from the hook-fed status files.
         self._responding = status.is_responding(now=now.timestamp())
         newest = aggregate.latest_record(records)
         self._update_model_dot(newest.model if newest else None)
-        if newest is not None and newest.message_id != self._last_msg_id:
-            if self._last_msg_id is not None:  # don't flash on first load
-                turn_cost = pricing.cost_for(
-                    newest.model, newest.input, newest.output,
-                    newest.cache_creation, newest.cache_read, mode,
-                )
-                intensity = flash_intensity(turn_cost, self.cfg.get("flash_full_cost", 0.25))
-                self._flash_turn(turn_cost, intensity)
-            self._last_msg_id = newest.message_id
+        self._update_turn_flash(records, mode)
 
         # Pulse the cost number when recent burn is in the top heat bucket.
         burn = aggregate.recent_delta(records, now, heat.COLOR_WINDOW_SECONDS, mode)
