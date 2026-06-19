@@ -34,8 +34,6 @@ _FLASH_GREY = "#8a8a8a"
 _DIM = "#777777"
 
 # Cost-scaled flash tuning.
-_FLASH_BASE_PT = 9       # idle/cheap flash font size
-_FLASH_MAX_BUMP = 5      # extra points added to the flash text at full intensity
 _FLASH_MIN_STEPS = 8     # fade steps for a cheap turn
 _FLASH_MAX_STEPS = 22    # fade steps for a full-burn turn (lingers longer)
 _BURST_THRESHOLD = 0.6   # intensity at/above which the cost total throbs
@@ -198,7 +196,6 @@ class UsageMonitorApp:
         self._pulse_phase = 0.0
         self._flash_seq = []             # per-turn fade colors (built on each flash)
         self._flash_idx = 0              # index into _flash_seq; >= len means idle
-        self._flash_sizes = []           # font sizes paired with _flash_seq
 
         # "Responding now" dot state (fed by usage_monitor.status).
         self._responding = False
@@ -379,19 +376,13 @@ class UsageMonitorApp:
             self.root.after(30, self._cost_tick)
 
     def _flash_turn(self, cost, intensity):
-        """Per-turn flash, scaled to cost: pricier turns flash hotter, bigger,
-        and linger longer; a big enough turn also throbs the cost total."""
+        """Per-turn flash, scaled to cost: pricier turns flash hotter and linger
+        longer; a big enough turn also throbs the cost total."""
         intensity = max(0.0, min(intensity, 1.0))
         peak = _blend(_FLASH_GREEN, _FLASH_HOT, intensity)
         n = round(_FLASH_MIN_STEPS + (_FLASH_MAX_STEPS - _FLASH_MIN_STEPS) * intensity)
-        peak_pt = _FLASH_BASE_PT + round(_FLASH_MAX_BUMP * intensity)
         self._flash_seq = [_blend(peak, _FLASH_GREY, i / (n - 1)) for i in range(n)]
-        # Font eases from the (bumped) peak back down to the base over the fade.
-        self._flash_sizes = [
-            round(peak_pt - (peak_pt - _FLASH_BASE_PT) * (i / (n - 1))) for i in range(n)
-        ]
-        self.flash_label.config(text=f"+{fmt_cost(cost)}", fg=self._flash_seq[0],
-                                font=("TkDefaultFont", self._flash_sizes[0], "bold"))
+        self.flash_label.config(text=f"+{fmt_cost(cost)}", fg=self._flash_seq[0])
         self._flash_idx = 1
         self.root.after(110, self._flash_step)
         if intensity >= _BURST_THRESHOLD:
@@ -400,8 +391,7 @@ class UsageMonitorApp:
     def _flash_step(self):
         if self._flash_idx >= len(self._flash_seq):
             return  # stays at the final grey
-        self.flash_label.config(fg=self._flash_seq[self._flash_idx],
-                                font=("TkDefaultFont", self._flash_sizes[self._flash_idx], "bold"))
+        self.flash_label.config(fg=self._flash_seq[self._flash_idx])
         self._flash_idx += 1
         self.root.after(110, self._flash_step)
 
