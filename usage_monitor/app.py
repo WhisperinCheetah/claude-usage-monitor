@@ -57,6 +57,24 @@ def parse_xrandr_monitors(text):
     return rects
 
 
+def _windows_virtual_screen():
+    """Bounding rect (x, y, w, h) of the whole Windows virtual desktop, or None.
+
+    Uses the SM_*VIRTUALSCREEN metrics so multi-monitor setups report every
+    display, unlike Tk's winfo_screenwidth (primary only).
+    """
+    try:
+        import ctypes
+        get = ctypes.windll.user32.GetSystemMetrics
+        # SM_XVIRTUALSCREEN=76, SM_YVIRTUALSCREEN=77, SM_CXVIRTUALSCREEN=78, SM_CYVIRTUALSCREEN=79
+        x, y, w, h = (get(76), get(77), get(78), get(79))
+        if w > 0 and h > 0:
+            return (x, y, w, h)
+    except (OSError, AttributeError):
+        pass
+    return None
+
+
 def clamp_to_monitors(x, y, win_w, win_h, monitors):
     """Keep a window fully within a real monitor.
 
@@ -150,13 +168,17 @@ class UsageMonitorApp:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _monitor_rects(self):
-        """Real monitor rectangles, falling back to the whole virtual screen.
+        """Monitor rectangles used to keep the restored window on-screen.
 
-        On X11 the bounding box can contain dead zones between offset monitors,
-        so ask xrandr for the actual rectangles. Other platforms (and any
-        failure) fall back to a single screen-sized rectangle.
+        Returns [] when we can't enumerate reliably, in which case the caller
+        leaves the saved position untouched. We deliberately do NOT fall back
+        to winfo_screen{width,height}: on Windows and macOS those report the
+        *primary* monitor only, so clamping to them would drag a window that
+        legitimately lives on a secondary monitor back onto the primary.
         """
         if self._winsys == "x11":
+            # X11 reports the full virtual screen, but offset monitors leave
+            # dead zones inside the bounding box — ask xrandr for the real rects.
             try:
                 out = subprocess.run(
                     ["xrandr", "--listmonitors"],
@@ -167,7 +189,17 @@ class UsageMonitorApp:
                     return rects
             except (OSError, subprocess.SubprocessError):
                 pass
-        return [(0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())]
+            # Frameless on X11; a single-monitor bounding box is a safe net.
+            return [(0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())]
+        if self._winsys == "win32":
+            # Frameless on Windows too, so it needs the net — but use the whole
+            # virtual desktop (all monitors), not just the primary.
+            rect = _windows_virtual_screen()
+            if rect:
+                return [rect]
+            return []
+        # aqua: a normal titled window the OS keeps reachable — don't clamp.
+        return []
 
     def _label(self, parent, text, **kw):
         opts = dict(bg="#1e1e1e", fg="#dddddd", font=("TkDefaultFont", 10))
