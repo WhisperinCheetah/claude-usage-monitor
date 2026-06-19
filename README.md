@@ -75,6 +75,14 @@ with `.\uninstall_windows.ps1`.
 On macOS the window uses a normal title bar (borderless windows are unreliable
 on Aqua); the right-click button is selected automatically per platform.
 
+## Usage
+
+- **Drag** to move; **right-click** (Control-click on macOS) to toggle
+  transparency or quit.
+- **Click the sparkline** to cycle its range; the bottom dropdowns set
+  timeframe, delta window, and cost method.
+- Settings persist between runs (see [Configuration](#configuration)).
+
 ## Features
 
 - **Real-cost estimate.** Per-model token usage priced at public API rates,
@@ -93,17 +101,7 @@ on Aqua); the right-click button is selected automatically per platform.
 - **Always on top**, draggable, with a **semi-transparent** toggle.
 - **Linux top-bar indicator** with a cost label color-coded by recent activity.
 
-## Usage
-
-- **Drag** the body to move the window.
-- **Right-click** (Control-click on macOS) for a menu: toggle **Semi-transparent**
-  or quit.
-- **Click the sparkline** to cycle its range.
-- The dropdowns at the bottom select timeframe, delta window, and cost method.
-- Position, timeframe, mode, transparency, and sparkline range persist between
-  runs (see [Configuration](#configuration)).
-
-### Top-bar indicator (Linux only)
+## Top-bar indicator (Linux only)
 
 `install.sh` also registers a GNOME AppIndicator and an autostart entry. The
 indicator shows the cost for the configured timeframe and is **color-coded** by
