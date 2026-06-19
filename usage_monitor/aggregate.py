@@ -92,6 +92,21 @@ def latest_record(records):
     return latest
 
 
+def model_by_session(records) -> dict:
+    """Map session id -> that session's newest model.
+
+    A transcript file is named ``<session_id>.jsonl``, so the file stem is the
+    session id. Used to color each responding-agent dot by its model.
+    """
+    out = {}          # session_id -> (timestamp, model)
+    for r in records:
+        sid = Path(r.source_file).stem
+        prev = out.get(sid)
+        if prev is None or r.timestamp > prev[0]:
+            out[sid] = (r.timestamp, r.model)
+    return {sid: model for sid, (_, model) in out.items()}
+
+
 def session_file(paths) -> Optional[Path]:
     newest = None
     newest_mtime = None

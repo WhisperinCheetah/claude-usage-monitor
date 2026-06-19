@@ -39,6 +39,20 @@ class TestStatus(unittest.TestCase):
         status.write_status("responding", "c", now=1000, status_dir=self.dir)
         self.assertTrue(status.is_responding(now=1000, status_dir=self.dir))
 
+    def test_responding_sessions_returns_only_fresh_responding_sorted(self):
+        status.write_status("responding", "b", "/p/b", now=1020, status_dir=self.dir)
+        status.write_status("responding", "a", "/p/a", now=1000, status_dir=self.dir)
+        status.write_status("idle", "c", "/p/c", now=1010, status_dir=self.dir)
+        status.write_status("responding", "stale", now=500, status_dir=self.dir)
+        sessions = status.responding_sessions(
+            now=1030, freshness_seconds=180, status_dir=self.dir)
+        self.assertEqual([s["session_id"] for s in sessions], ["a", "b"])  # ts order
+        self.assertEqual(sessions[0]["cwd"], "/p/a")
+
+    def test_responding_sessions_empty_when_no_dir(self):
+        self.assertEqual(
+            status.responding_sessions(now=1000, status_dir=self.dir / "nope"), [])
+
     def test_clear_removes_the_session(self):
         status.write_status("responding", "sess-1", now=1000, status_dir=self.dir)
         status.clear_status("sess-1", status_dir=self.dir)

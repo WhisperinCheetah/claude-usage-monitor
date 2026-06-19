@@ -51,12 +51,17 @@ def clear_status(session_id, *, status_dir=None) -> None:
         pass
 
 
-def is_responding(*, now=None, freshness_seconds=FRESHNESS_SECONDS, status_dir=None) -> bool:
-    """True if any session is freshly marked "responding"."""
+def responding_sessions(*, now=None, freshness_seconds=FRESHNESS_SECONDS, status_dir=None) -> list:
+    """Freshly-responding sessions as ``{session_id, cwd, ts}``, oldest ts first.
+
+    Sorting by ``ts`` gives a stable left-to-right order across refreshes so the
+    dots don't jump around as files are re-read.
+    """
     base = _resolve_dir(status_dir)
     if not base.is_dir():
-        return False
+        return []
     cutoff = (time.time() if now is None else now) - freshness_seconds
+    out = []
     for path in base.glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -64,6 +69,18 @@ def is_responding(*, now=None, freshness_seconds=FRESHNESS_SECONDS, status_dir=N
             continue
         if not isinstance(data, dict):
             continue
-        if data.get("state") == "responding" and float(data.get("ts", 0)) >= cutoff:
-            return True
-    return False
+        ts = float(data.get("ts", 0) or 0)
+        if data.get("state") == "responding" and ts >= cutoff:
+            out.append({
+                "session_id": str(data.get("session_id") or path.stem),
+                "cwd": str(data.get("cwd") or ""),
+                "ts": ts,
+            })
+    out.sort(key=lambda s: s["ts"])
+    return out
+
+
+def is_responding(*, now=None, freshness_seconds=FRESHNESS_SECONDS, status_dir=None) -> bool:
+    """True if any session is freshly marked "responding"."""
+    return bool(responding_sessions(
+        now=now, freshness_seconds=freshness_seconds, status_dir=status_dir))

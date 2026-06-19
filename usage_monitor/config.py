@@ -10,7 +10,7 @@ DEFAULTS = {
     "translucent": False,      # widget semi-transparency toggle
     "tray_show_delta": False,  # tray label shows recent delta vs. total
     "spark_range": "24h",      # sparkline range (1h / 24h / 7d / 30d)
-    "flash_full_cost": 0.25,   # per-turn $ that maxes out the cost flash intensity
+    "flash_full_cost": 0.50,   # per-turn $ that maxes out the cost flash intensity
 }
 
 

@@ -4,8 +4,10 @@ from usage_monitor.app import (
     _heartbeat_intensities,
     clamp_to_monitors,
     clamp_to_screen,
+    cycle_index,
     flash_intensity,
     parse_xrandr_monitors,
+    project_name,
     turn_flash_decision,
 )
 
@@ -125,6 +127,39 @@ class TestTurnFlashDecision(unittest.TestCase):
     def test_idle_with_no_new_cost_yields_zero(self):
         cost, _ = turn_flash_decision(10.0, 10.0, False, False, 0.0)
         self.assertEqual(cost, 0.0)  # caller filters this out
+
+
+class TestProjectName(unittest.TestCase):
+    def test_basename(self):
+        self.assertEqual(project_name("/home/a3j/Documents/projects/usage-monitor"),
+                         "usage-monitor")
+
+    def test_trailing_slash(self):
+        self.assertEqual(project_name("/home/a3j/work/Slotting/"), "Slotting")
+
+    def test_truncation_with_ellipsis(self):
+        out = project_name("/x/this-is-a-very-long-project-name", max_len=10)
+        self.assertEqual(len(out), 10)
+        self.assertTrue(out.endswith("…"))
+
+    def test_empty_cwd(self):
+        self.assertEqual(project_name(""), "?")
+
+
+class TestCycleIndex(unittest.TestCase):
+    def test_single_item_always_zero(self):
+        self.assertEqual(cycle_index(1, 999, 22), 0)
+        self.assertEqual(cycle_index(0, 999, 22), 0)
+
+    def test_holds_then_advances_and_wraps(self):
+        self.assertEqual(cycle_index(3, 0, 10), 0)
+        self.assertEqual(cycle_index(3, 9, 10), 0)   # still holding first
+        self.assertEqual(cycle_index(3, 10, 10), 1)  # advanced
+        self.assertEqual(cycle_index(3, 20, 10), 2)
+        self.assertEqual(cycle_index(3, 30, 10), 0)  # wrapped
+
+    def test_zero_hold_is_safe(self):
+        self.assertEqual(cycle_index(3, 5, 0), 0)
 
 
 class TestHeartbeat(unittest.TestCase):

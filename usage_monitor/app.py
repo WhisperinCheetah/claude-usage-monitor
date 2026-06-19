@@ -4,6 +4,7 @@ import re
 import subprocess
 import tkinter as tk
 from datetime import datetime, timezone
+from pathlib import Path
 
 from usage_monitor import aggregate, config, heat, pricing, sparkline, status, transcripts
 from usage_monitor.format import fmt_cost, fmt_tokens
@@ -39,12 +40,35 @@ _FLASH_MAX_STEPS = 22    # fade steps for a full-burn turn (lingers longer)
 _BURST_THRESHOLD = 0.7   # intensity at/above which the cost total throbs
 _BURST_STEP_MS = 55      # frame time for the heartbeat burst
 
+# Responding-dot cluster.
+_DOT_H = 16               # height of the dot canvas in the top bar
+_DOT_R = 4                # dot radius
+_DOT_GAP = 12            # horizontal step between dot centers
+_DOT_UNKNOWN = "#9aa0a6"  # dot color when a session's model can't be resolved
+_DOT_DARK = "#3a3a3a"     # shimmer floor a dot dims toward
+_CYCLE_HOLD = 22          # pulse ticks (~90ms each) to hold each cycled name (~2s)
+
 
 def flash_intensity(cost, full_cost):
     """Map a turn's cost to 0..1 flash intensity against the full-burn ceiling."""
     if not full_cost or full_cost <= 0 or cost <= 0:
         return 0.0
     return max(0.0, min(cost / full_cost, 1.0))
+
+
+def project_name(cwd, max_len=18):
+    """Short project label for a responding agent: basename of its cwd."""
+    name = Path(cwd).name or str(cwd) or "?"
+    if len(name) > max_len:
+        name = name[: max_len - 1] + "…"
+    return name
+
+
+def cycle_index(n, tick, hold):
+    """Which of `n` items is shown at `tick`, holding each for `hold` ticks."""
+    if n <= 1 or hold <= 0:
+        return 0
+    return (tick // hold) % n
 
 
 def turn_flash_decision(prev_total, total, was_responding, responding, anchor):
@@ -231,8 +255,11 @@ class UsageMonitorApp:
 
         # "Responding now" dot state (fed by usage_monitor.status).
         self._responding = False
-        self._model_norm = None          # normalized model of the newest record
-        self._dot_phase = 0.0            # shimmer phase for the responding dot
+        self._model_norm = None          # normalized model of the newest record (idle)
+        self._responding_sessions = []   # [{session_id, cwd, ts}] currently responding
+        self._model_map = {}             # session_id -> model, for per-agent dot color
+        self._dot_phase = 0.0            # shimmer phase for the responding dots
+        self._dot_tick = 0               # advances each pulse; drives the name cycle
 
         # Per-turn "heartbeat" burst on a pricey turn (overrides the hot pulse).
         self._burst_seq = []
@@ -283,17 +310,18 @@ class UsageMonitorApp:
         return tk.Label(parent, text=text, **opts)
 
     def _build_widgets(self):
-        # Top bar: "currently on" model dot (left), per-turn flash + close (right).
+        # Top bar: responding-agent dots (left), per-turn flash + close (right).
         topbar = tk.Frame(self.root, bg="#1e1e1e")
         topbar.pack(fill="x", padx=8, pady=(6, 0))
-        self.model_label = self._label(topbar, "● —", fg=_DIM,
-                                       font=("TkDefaultFont", 9))
-        self.model_label.pack(side="left")
+        # Right-side widgets are packed first so the dot canvas fills what's left.
         close_btn = self._label(topbar, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
         close_btn.pack(side="right")
         close_btn.bind("<Button-1>", lambda _e: self._on_close())
         self.flash_label = self._label(topbar, "", fg=_FLASH_GREY, font=("TkDefaultFont", 9))
         self.flash_label.pack(side="right", padx=(0, 8))
+        # One model-colored dot per responding agent + a (cycling) project name.
+        self.dots = tk.Canvas(topbar, height=_DOT_H, bg="#1e1e1e", highlightthickness=0)
+        self.dots.pack(side="left", fill="x", expand=True)
 
         # Controls live at the bottom so their opened menus don't cover the figures.
         controls = tk.Frame(self.root, bg="#1e1e1e")
@@ -349,7 +377,7 @@ class UsageMonitorApp:
         self.spark.pack(fill="x", padx=8, pady=(2, 2))
         self.spark.bind("<Button-1>", self._cycle_spark_range)
 
-        self._drag_targets = [self.root, topbar, self.model_label, self.flash_label,
+        self._drag_targets = [self.root, topbar, self.dots, self.flash_label,
                               body, cost_row, self.tokens_label, self.cost_label,
                               self.delta_label, self.breakdown_label]
 
@@ -473,28 +501,57 @@ class UsageMonitorApp:
                 self.cost_label.config(fg=_blend(_COST_BASE, _COST_HOT, t))
             else:
                 self.cost_label.config(fg=_COST_BASE)
-        if self._responding:
+        if self._responding_sessions:
             self._dot_phase += 0.30
-        self._render_dot()
+            self._dot_tick += 1
+        self._render_dots()
         self.root.after(90, self._pulse_step)
 
     def _update_model_dot(self, model):
+        # Newest record's model — used for the idle dot when nothing responds.
         self._model_norm = pricing.normalize_model(model) if model else None
-        self._render_dot()
+        self._render_dots()
 
-    def _render_dot(self):
-        """Draw the top-left "currently on" dot; shimmers while responding."""
-        if self._model_norm is None:
-            self.model_label.config(text="● —", fg=_DIM)
+    def _dot_color(self, session):
+        norm = pricing.normalize_model(self._model_map.get(session["session_id"], ""))
+        return _MODEL_COLORS.get(norm, _DOT_UNKNOWN)
+
+    def _render_dots(self):
+        """Draw the responding-agent dot cluster (or the idle model dot)."""
+        c = self.dots
+        c.delete("all")
+        y = _DOT_H // 2
+        sessions = self._responding_sessions
+
+        if not sessions:  # idle: one steady dot + the newest model's short name
+            if self._model_norm is None:
+                c.create_oval(0, y - _DOT_R, 2 * _DOT_R, y + _DOT_R, fill=_DIM, width=0)
+                c.create_text(2 * _DOT_R + 6, y, anchor="w", text="—", fill=_DIM,
+                              font=("TkDefaultFont", 9))
+                return
+            base = _MODEL_COLORS.get(self._model_norm, _DOT_UNKNOWN)
+            short = _MODEL_SHORT.get(self._model_norm, self._model_norm)
+            c.create_oval(0, y - _DOT_R, 2 * _DOT_R, y + _DOT_R, fill=base, width=0)
+            c.create_text(2 * _DOT_R + 6, y, anchor="w", text=short, fill=base,
+                          font=("TkDefaultFont", 9))
             return
-        short = _MODEL_SHORT.get(self._model_norm, self._model_norm)
-        base = _MODEL_COLORS.get(self._model_norm, "#aaaaaa")
-        if self._responding:
-            t = (math.sin(self._dot_phase) + 1) / 2
-            self.model_label.config(text=f"● {short} · responding",
-                                    fg=_blend("#3a3a3a", base, 0.35 + 0.65 * t))
-        else:
-            self.model_label.config(text=f"● {short}", fg=base)
+
+        n = len(sessions)
+        active = cycle_index(n, self._dot_tick, _CYCLE_HOLD)
+        t = (math.sin(self._dot_phase) + 1) / 2
+        for i, s in enumerate(sessions):
+            base = self._dot_color(s)
+            # The currently-named agent's dot glows bright; the rest shimmer dim.
+            lo, hi = (0.7, 1.0) if i == active else (0.2, 0.55)
+            color = _blend(_DOT_DARK, base, lo + (hi - lo) * t)
+            cx = _DOT_R + i * _DOT_GAP
+            c.create_oval(cx - _DOT_R, y - _DOT_R, cx + _DOT_R, y + _DOT_R,
+                          fill=color, width=0)
+        text_x = _DOT_R + (n - 1) * _DOT_GAP + _DOT_R + 7
+        name = project_name(sessions[active]["cwd"])
+        c.create_text(text_x, y, anchor="w", text=name,
+                      fill=_blend(self._dot_color(sessions[active]), "#f0f0f0", 0.5),
+                      font=("TkDefaultFont", 9))
 
     def _draw_sparkline(self, values):
         c = self.spark
@@ -614,9 +671,11 @@ class UsageMonitorApp:
             fg=_COST_BASE if delta > 0 else _DIM,
         )
 
-        # "Currently on" dot (newest record) + one cost flash per response.
-        # The live responding/idle state comes from the hook-fed status files.
-        self._responding = status.is_responding(now=now.timestamp())
+        # Responding-agent dots + one cost flash per response. The live
+        # responding state comes from the hook-fed per-session status files.
+        self._responding_sessions = status.responding_sessions(now=now.timestamp())
+        self._responding = bool(self._responding_sessions)
+        self._model_map = aggregate.model_by_session(records)
         newest = aggregate.latest_record(records)
         self._update_model_dot(newest.model if newest else None)
         self._update_turn_flash(records, mode)

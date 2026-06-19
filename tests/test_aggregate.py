@@ -12,6 +12,24 @@ def rec(ts, model="claude-opus-4-8", i=0, o=0, cc=0, cr=0, mid="m", src="f"):
     return UsageRecord(ts, model, i, o, cc, cr, mid, src)
 
 
+class TestModelBySession(unittest.TestCase):
+    def test_maps_session_stem_to_newest_model(self):
+        t0 = datetime(2026, 6, 18, 14, 0, tzinfo=timezone.utc)
+        t1 = datetime(2026, 6, 18, 14, 5, tzinfo=timezone.utc)
+        recs = [
+            rec(t0, model="claude-sonnet-4-6", src="/p/sessA.jsonl"),
+            rec(t1, model="claude-opus-4-8", src="/p/sessA.jsonl"),   # newer wins
+            rec(t0, model="claude-haiku-4-5", src="/q/sessB.jsonl"),
+        ]
+        self.assertEqual(
+            aggregate.model_by_session(recs),
+            {"sessA": "claude-opus-4-8", "sessB": "claude-haiku-4-5"},
+        )
+
+    def test_empty(self):
+        self.assertEqual(aggregate.model_by_session([]), {})
+
+
 class TestBounds(unittest.TestCase):
     def setUp(self):
         # Thursday 2026-06-18 14:30 UTC
