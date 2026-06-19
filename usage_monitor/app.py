@@ -27,16 +27,16 @@ _MODEL_COLORS = {
 }
 _COST_BASE = "#7ec699"   # normal cost-number color
 _COST_HOT = "#caf7d8"    # peak of the "hot" pulse
-_COST_BURST = "#ffffff"  # peak of a per-turn "heartbeat" burst on a pricey turn
+_COST_BURST = "#eafff2"  # peak of a per-turn "heartbeat" burst on a pricey turn
 _FLASH_GREEN = "#7ee787"  # cheap-turn flash peak
-_FLASH_HOT = "#ffffff"    # expensive-turn flash peak (white-hot)
+_FLASH_HOT = "#d6f5dd"    # expensive-turn flash peak (soft bright green)
 _FLASH_GREY = "#8a8a8a"
 _DIM = "#777777"
 
 # Cost-scaled flash tuning.
 _FLASH_MIN_STEPS = 8     # fade steps for a cheap turn
 _FLASH_MAX_STEPS = 22    # fade steps for a full-burn turn (lingers longer)
-_BURST_THRESHOLD = 0.6   # intensity at/above which the cost total throbs
+_BURST_THRESHOLD = 0.7   # intensity at/above which the cost total throbs
 _BURST_STEP_MS = 55      # frame time for the heartbeat burst
 
 
@@ -255,7 +255,7 @@ class UsageMonitorApp:
         topbar = tk.Frame(self.root, bg="#1e1e1e")
         topbar.pack(fill="x", padx=8, pady=(6, 0))
         self.model_label = self._label(topbar, "● —", fg=_DIM,
-                                       font=("TkDefaultFont", 9, "bold"))
+                                       font=("TkDefaultFont", 9))
         self.model_label.pack(side="left")
         close_btn = self._label(topbar, "✕", fg="#888888", font=("TkDefaultFont", 10, "bold"))
         close_btn.pack(side="right")
@@ -436,7 +436,7 @@ class UsageMonitorApp:
         base = _MODEL_COLORS.get(self._model_norm, "#aaaaaa")
         if self._responding:
             t = (math.sin(self._dot_phase) + 1) / 2
-            self.model_label.config(text=f"● {short} ⚡ responding",
+            self.model_label.config(text=f"● {short} · responding",
                                     fg=_blend("#3a3a3a", base, 0.35 + 0.65 * t))
         else:
             self.model_label.config(text=f"● {short}", fg=base)
