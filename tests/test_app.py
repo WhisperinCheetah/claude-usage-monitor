@@ -6,9 +6,10 @@ from usage_monitor.app import (
     clamp_to_screen,
     cycle_index,
     flash_intensity,
+    flash_delta,
     parse_xrandr_monitors,
     project_name,
-    turn_flash_decision,
+    running_models,
 )
 
 
@@ -95,38 +96,22 @@ class TestFlashIntensity(unittest.TestCase):
         self.assertEqual(flash_intensity(1.0, -0.5), 0.0)
 
 
-class TestTurnFlashDecision(unittest.TestCase):
-    def test_turn_start_banks_anchor_and_does_not_flash(self):
-        # idle -> responding: remember pre-turn total (10.0), no flash yet.
-        cost, anchor = turn_flash_decision(10.0, 10.0, False, True, 0.0)
-        self.assertIsNone(cost)
-        self.assertEqual(anchor, 10.0)
+class TestFlashDelta(unittest.TestCase):
+    def test_new_spend_since_last_poll(self):
+        # A (sub)response finished between polls: flash just its small cost.
+        self.assertAlmostEqual(flash_delta(10.0, 10.07), 0.07)
 
-    def test_mid_turn_accumulates_silently(self):
-        # responding -> responding: messages arrived (10 -> 10.4) but no flash.
-        cost, anchor = turn_flash_decision(10.0, 10.4, True, True, 9.0)
-        self.assertIsNone(cost)
-        self.assertEqual(anchor, 9.0)  # anchor unchanged mid-turn
+    def test_no_new_spend_is_zero(self):
+        self.assertEqual(flash_delta(10.0, 10.0), 0.0)  # caller filters this out
 
-    def test_turn_end_flashes_whole_response_cost(self):
-        # responding -> idle: flash total(12.5) - anchor(10.0) = the turn's cost.
-        cost, _ = turn_flash_decision(12.5, 12.5, True, False, 10.0)
-        self.assertAlmostEqual(cost, 2.5)
+    def test_never_negative_on_total_drop(self):
+        # Timeframe rollover / removed records mustn't flash a negative.
+        self.assertEqual(flash_delta(12.5, 10.0), 0.0)
 
-    def test_end_sums_many_substeps_into_one_flash(self):
-        # A turn that started at 10.0 and, across several tool steps, reached
-        # 13.2 flashes 3.2 once — not once per step.
-        cost, _ = turn_flash_decision(13.2, 13.2, True, False, 10.0)
-        self.assertAlmostEqual(cost, 3.2)
-
-    def test_fast_turn_between_polls_flashes_delta(self):
-        # idle -> idle but new cost appeared (hookless, or sub-poll turn).
-        cost, _ = turn_flash_decision(10.0, 10.7, False, False, 0.0)
-        self.assertAlmostEqual(cost, 0.7)
-
-    def test_idle_with_no_new_cost_yields_zero(self):
-        cost, _ = turn_flash_decision(10.0, 10.0, False, False, 0.0)
-        self.assertEqual(cost, 0.0)  # caller filters this out
+    def test_does_not_balloon_with_concurrent_agents(self):
+        # Each poll only reports the delta since the previous one — never the
+        # whole concurrent window summed together (the old +$2347 bug).
+        self.assertAlmostEqual(flash_delta(2000.0, 2000.12), 0.12)
 
 
 class TestProjectName(unittest.TestCase):
@@ -168,6 +153,38 @@ class TestHeartbeat(unittest.TestCase):
         self.assertEqual(seq[-1], 0.0)
         self.assertEqual(seq.count(1.0), 2)  # one peak per beat
         self.assertTrue(all(0.0 <= t <= 1.0 for t in seq))
+
+
+class TestRunningModels(unittest.TestCase):
+    def test_empty_when_no_sessions(self):
+        self.assertEqual(running_models([], {"s1": "claude-opus-4-8"}), set())
+
+    def test_maps_session_to_normalized_model(self):
+        sessions = [{"session_id": "s1"}, {"session_id": "s2"}]
+        mm = {"s1": "claude-opus-4-8", "s2": "claude-sonnet-4-6"}
+        self.assertEqual(running_models(sessions, mm),
+                         {"claude-opus-4-8", "claude-sonnet-4-6"})
+
+    def test_dedupes_shared_model(self):
+        sessions = [{"session_id": "s1"}, {"session_id": "s2"}]
+        mm = {"s1": "claude-opus-4-8", "s2": "claude-opus-4-8"}
+        self.assertEqual(running_models(sessions, mm), {"claude-opus-4-8"})
+
+    def test_missing_or_blank_model_is_skipped(self):
+        sessions = [{"session_id": "s1"}, {"session_id": "s2"}]
+        mm = {"s1": ""}  # s2 absent entirely
+        self.assertEqual(running_models(sessions, mm), set())
+
+    def test_session_model_takes_precedence_over_map(self):
+        # The hook-stamped model on the session wins over the transcript map.
+        sessions = [{"session_id": "s1", "model": "claude-sonnet-4-6"}]
+        mm = {"s1": "claude-opus-4-8"}
+        self.assertEqual(running_models(sessions, mm), {"claude-sonnet-4-6"})
+
+    def test_falls_back_to_map_when_session_has_no_model(self):
+        sessions = [{"session_id": "s1", "model": ""}]
+        mm = {"s1": "claude-opus-4-8"}
+        self.assertEqual(running_models(sessions, mm), {"claude-opus-4-8"})
 
 
 if __name__ == "__main__":

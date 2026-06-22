@@ -70,31 +70,17 @@ def cycle_index(n, tick, hold):
     return (tick // hold) % n
 
 
-def turn_flash_decision(prev_total, total, was_responding, responding, anchor):
-    """Decide the per-*response* cost flash from cumulative cost + responding state.
+def flash_delta(prev_total, total):
+    """New spend since the last poll (0.0 if none).
 
-    A Claude turn writes many assistant messages (one per tool step); we want one
-    flash for the whole response, not one per step. Strategy:
-
-    - turn start (idle -> responding): remember the cost just before it, flash
-      nothing yet;
-    - mid-turn (responding -> responding): accumulate silently;
-    - turn end (responding -> idle): flash the whole turn's cost (total - anchor);
-    - idle -> idle with new cost: a turn that began and ended between two polls,
-      or a session with no hooks installed — flash the delta since last refresh.
-
-    Returns ``(flash_cost_or_None, new_anchor)``. ``flash_cost_or_None`` is None
-    when nothing should flash; otherwise the caller still filters tiny amounts.
+    Replaces the old per-*response* coalescing, which keyed off a single global
+    "is anything responding?" flag. With several agents answering at once that
+    flag stays true across the whole concurrent window, so the "one turn" it
+    measured summed every agent's spend into a single giant flash (e.g. +$2347).
+    A plain per-poll delta against the (monotonic) cumulative total is small,
+    correct, and independent of how many agents are active.
     """
-    started = responding and not was_responding
-    ended = was_responding and not responding
-    if started:
-        return None, prev_total          # bank the pre-turn cost; don't flash yet
-    if ended:
-        return total - anchor, anchor    # the whole response's cost
-    if not responding:
-        return total - prev_total, anchor  # fast turn / no hooks: per-poll delta
-    return None, anchor                  # mid-turn: keep accumulating quietly
+    return max(0.0, total - prev_total)
 
 
 def _heartbeat_intensities(beats):
@@ -204,6 +190,24 @@ def _blend(a, b, t):
     return f"#{round(ar+(br-ar)*t):02x}{round(ag+(bg-ag)*t):02x}{round(ab+(bb-ab)*t):02x}"
 
 
+def running_models(sessions, model_map):
+    """Normalized model ids that have a currently-responding agent.
+
+    `sessions` is `status.responding_sessions()` output; `model_map` is
+    session_id -> model. Used to tint the per-model breakdown in the color of
+    whichever models are live right now.
+    """
+    out = set()
+    for s in sessions:
+        # Prefer the model the hook stamped on the status file (authoritative
+        # for the whole turn); fall back to the transcript-derived map.
+        raw = s.get("model") or model_map.get(s["session_id"])
+        if not raw:  # normalize_model() defaults blanks to Opus — don't guess
+            continue
+        out.add(pricing.normalize_model(raw))
+    return out
+
+
 class UsageMonitorApp:
     def __init__(self, projects_dir=None, config_file=None):
         self.projects_dir = projects_dir or transcripts.default_projects_dir()
@@ -236,16 +240,14 @@ class UsageMonitorApp:
         self._cost_shown = 0.0           # currently-displayed cost (for roll-up)
         self._cost_target = 0.0
         self._cost_animating = False
-        # Per-response flash bookkeeping (see turn_flash_decision): cumulative
-        # cost last seen, cost banked at the current turn's start, and whether
-        # the previous refresh saw a session responding.
+        # Cumulative cost at the last refresh; the +$ flash shows the delta.
         self._last_total = None          # None until the first refresh baselines it
-        self._turn_anchor = 0.0
-        self._was_responding = False
         self._hot = False                # recent burn in the top bucket -> pulse
         self._pulse_phase = 0.0
         self._flash_seq = []             # per-turn fade colors (built on each flash)
         self._flash_idx = 0              # index into _flash_seq; >= len means idle
+        self._dragged = False            # did the last press actually move the window?
+        self._bd_labels = []             # reused per-model breakdown segment labels
 
         # "Responding now" dot state (fed by usage_monitor.status).
         self._responding = False
@@ -362,8 +364,12 @@ class UsageMonitorApp:
         self.delta_label = self._label(cost_row, "", font=("TkDefaultFont", 10), fg=_DIM)
         self.delta_label.pack(side="left", padx=(8, 0))
 
-        self.breakdown_label = self._label(body, "", fg="#999999", font=("TkDefaultFont", 9))
-        self.breakdown_label.pack(anchor="w")
+        # Per-model usage breakdown. Each segment is tinted in its model
+        # ("agent") color while a session on that model is responding, and dim
+        # otherwise — a running indicator right under the total cost. A frame of
+        # per-segment labels is needed because one Label can't be multi-colored.
+        self.breakdown_frame = tk.Frame(body, bg="#1e1e1e")
+        self.breakdown_frame.pack(anchor="w")
 
         # Sparkline of recent cost; click to cycle its range.
         self.spark = tk.Canvas(self.root, height=SPARK_H, bg="#1e1e1e", highlightthickness=0)
@@ -372,7 +378,7 @@ class UsageMonitorApp:
 
         self._drag_targets = [self.root, topbar, self.dots, self.flash_label,
                               body, cost_row, self.tokens_label, self.cost_label,
-                              self.delta_label, self.breakdown_label]
+                              self.delta_label, self.breakdown_frame]
 
     @staticmethod
     def _label_for_key(pairs, key):
@@ -449,21 +455,11 @@ class UsageMonitorApp:
         self.root.after(110, self._flash_step)
 
     def _update_turn_flash(self, records, mode):
-        """Flash the +$ cost once per response (not per intermediate message)."""
+        """Flash the +$ for new spend since the last refresh."""
         total = aggregate.rollup(records, mode)["total_cost"]
-        if self._last_total is None:          # first load: baseline only, no flash
-            self._last_total = total
-            self._turn_anchor = total
-            self._was_responding = self._responding
-            return
-        cost, self._turn_anchor = turn_flash_decision(
-            self._last_total, total, self._was_responding, self._responding,
-            self._turn_anchor,
-        )
-        if cost is not None:
-            self._flash_cost(cost)
+        if self._last_total is not None:      # skip the first load (baseline only)
+            self._flash_cost(flash_delta(self._last_total, total))
         self._last_total = total
-        self._was_responding = self._responding
 
     def _flash_cost(self, turn_cost):
         if turn_cost <= 0.0005:           # ignore noise / no real new spend
@@ -506,8 +502,12 @@ class UsageMonitorApp:
         self._render_dots()
 
     def _dot_color(self, session):
-        norm = pricing.normalize_model(self._model_map.get(session["session_id"], ""))
-        return _MODEL_COLORS.get(norm, _DOT_UNKNOWN)
+        # Same model source as the breakdown (hook first, then transcript map)
+        # so the dot and the per-agent tint can never disagree.
+        raw = session.get("model") or self._model_map.get(session["session_id"], "")
+        if not raw:
+            return _DOT_UNKNOWN
+        return _MODEL_COLORS.get(pricing.normalize_model(raw), _DOT_UNKNOWN)
 
     def _render_dots(self):
         """Draw the responding-agent dot cluster (or the idle model dot)."""
@@ -572,17 +572,32 @@ class UsageMonitorApp:
 
     def _bind_drag(self):
         for w in self._drag_targets:
-            w.bind("<Button-1>", self._start_drag)
-            w.bind("<B1-Motion>", self._on_drag)
+            self._bind_drag_widget(w)
+
+    def _bind_drag_widget(self, w):
+        w.bind("<Button-1>", self._start_drag)
+        w.bind("<B1-Motion>", self._on_drag)
+        w.bind("<ButtonRelease-1>", self._end_drag)
 
     def _start_drag(self, event):
         self._drag_x = event.x_root - self.root.winfo_x()
         self._drag_y = event.y_root - self.root.winfo_y()
+        self._dragged = False
 
     def _on_drag(self, event):
         x = event.x_root - self._drag_x
         y = event.y_root - self._drag_y
+        self._dragged = True
         self.root.geometry(f"+{x}+{y}")
+
+    def _end_drag(self, _event=None):
+        # Persist position the moment a drag ends, so the widget reopens where
+        # the user left it even if the process is later killed (reboot, crash,
+        # recovery) without a clean close. Previously position only persisted on
+        # a settings change or ✕-close, so a kill reverted to a stale position.
+        if self._dragged:
+            self._dragged = False
+            self._save()
 
     def _current_timeframe_key(self):
         return self._key_for_label(aggregate.TIMEFRAMES, self.tf_var.get())
@@ -631,7 +646,17 @@ class UsageMonitorApp:
         result = aggregate.rollup(selected, mode)
         self.tokens_label.config(text=f"Tokens   {fmt_tokens(result['total_tokens'])}")
         self._set_cost(result["total_cost"])  # animated roll-up
-        self.breakdown_label.config(text=self._breakdown_text(result["by_model"]))
+
+        # Live responding state (hook-fed per-session files). Resolved here
+        # because it also tints the per-model breakdown in each running agent's
+        # color, alongside feeding the top responding-dot cluster.
+        self._responding_sessions = status.responding_sessions(now=now.timestamp())
+        self._responding = bool(self._responding_sessions)
+        self._model_map = aggregate.model_by_session(records)
+        self._render_breakdown(
+            result["by_model"],
+            running_models(self._responding_sessions, self._model_map),
+        )
 
         win = self.delta_var.get()
         delta = aggregate.recent_delta(selected, now, aggregate.delta_seconds(win), mode)
@@ -640,11 +665,6 @@ class UsageMonitorApp:
             fg=_COST_BASE if delta > 0 else _DIM,
         )
 
-        # Responding-agent dots + one cost flash per response. The live
-        # responding state comes from the hook-fed per-session status files.
-        self._responding_sessions = status.responding_sessions(now=now.timestamp())
-        self._responding = bool(self._responding_sessions)
-        self._model_map = aggregate.model_by_session(records)
         newest = aggregate.latest_record(records)
         self._update_model_dot(newest.model if newest else None)
         self._update_turn_flash(records, mode)
@@ -658,15 +678,39 @@ class UsageMonitorApp:
 
         self.status_label.config(text=f"● updated {datetime.now().strftime('%H:%M:%S')}")
 
-    @staticmethod
-    def _breakdown_text(by_model):
-        if not by_model:
-            return "no usage in range"
-        parts = []
-        for model, vals in sorted(by_model.items(), key=lambda kv: -kv[1]["cost"]):
-            short = _MODEL_SHORT.get(model, model)
-            parts.append(f"{short} {fmt_cost(vals['cost'])}")
-        return " · ".join(parts)
+    def _render_breakdown(self, by_model, running):
+        """Update the per-model usage line *in place*, tinting each model's
+        segment in its model ("agent") color while a session on that model is
+        responding, and dimming the rest. `running` is a set of normalized model
+        ids.
+
+        Labels are reused across refreshes — recreating them every tick made the
+        line blink invisible→visible as Tk briefly painted the empty frame.
+        """
+        if by_model:
+            tokens = []
+            for i, (model, vals) in enumerate(
+                    sorted(by_model.items(), key=lambda kv: -kv[1]["cost"])):
+                if i:
+                    tokens.append((" · ", "#555555"))
+                color = _MODEL_COLORS.get(model, _DOT_UNKNOWN) if model in running else "#999999"
+                tokens.append((f"{_MODEL_SHORT.get(model, model)} {fmt_cost(vals['cost'])}", color))
+        else:
+            tokens = [("no usage in range", "#999999")]
+
+        # Grow the reusable label pool as needed (never shrink — just hide).
+        while len(self._bd_labels) < len(tokens):
+            lbl = self._label(self.breakdown_frame, "", font=("TkDefaultFont", 9))
+            lbl.pack(side="left")
+            self._bind_drag_widget(lbl)
+            self._bd_labels.append(lbl)
+        for lbl, (text, fg) in zip(self._bd_labels, tokens):
+            lbl.config(text=text, fg=fg)
+            if lbl.winfo_manager() != "pack":  # re-show one hidden earlier
+                lbl.pack(side="left")
+        for lbl in self._bd_labels[len(tokens):]:
+            if lbl.winfo_manager() == "pack":
+                lbl.pack_forget()
 
     def _tick(self):
         self.refresh()

@@ -26,6 +26,29 @@ class TestStatus(unittest.TestCase):
         status.write_status("idle", "sess-1", now=1000, status_dir=self.dir)
         self.assertFalse(status.is_responding(now=1000, status_dir=self.dir))
 
+    def test_model_is_stored_and_returned(self):
+        status.write_status("responding", "sess-1", "/p", "claude-sonnet-4-6",
+                            now=1000, status_dir=self.dir)
+        sessions = status.responding_sessions(now=1000, status_dir=self.dir)
+        self.assertEqual(sessions[0]["model"], "claude-sonnet-4-6")
+
+    def test_model_defaults_blank_when_absent(self):
+        status.write_status("responding", "sess-1", now=1000, status_dir=self.dir)
+        sessions = status.responding_sessions(now=1000, status_dir=self.dir)
+        self.assertEqual(sessions[0]["model"], "")
+
+    def test_model_from_transcript_reads_newest(self):
+        p = self.dir / "t.jsonl"
+        p.write_text(
+            json.dumps({"message": {"role": "assistant", "model": "claude-opus-4-8"}}) + "\n"
+            + json.dumps({"message": {"role": "user"}}) + "\n"
+            + json.dumps({"message": {"role": "assistant", "model": "claude-sonnet-4-6"}}) + "\n",
+            encoding="utf-8")
+        self.assertEqual(status.model_from_transcript(p), "claude-sonnet-4-6")
+
+    def test_model_from_transcript_missing_file_is_blank(self):
+        self.assertEqual(status.model_from_transcript(self.dir / "nope.jsonl"), "")
+
     def test_stale_responding_decays_to_not_responding(self):
         status.write_status("responding", "sess-1", now=1000, status_dir=self.dir)
         # 200s later, past the 180s freshness window.

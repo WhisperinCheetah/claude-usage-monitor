@@ -35,7 +35,14 @@ def main() -> int:
         if state == "end":
             status.clear_status(session_id)
         else:
-            status.write_status(state, session_id, cwd)
+            # The model isn't in the hook payload, but transcript_path is — read
+            # the session's model from it so the monitor can color this agent for
+            # the whole turn. Best-effort: "" if it can't be read.
+            model = ""
+            tp = payload.get("transcript_path")
+            if state == "responding" and tp:
+                model = status.model_from_transcript(tp)
+            status.write_status(state, session_id, cwd, model)
     except Exception:
         pass  # never break a Claude turn over telemetry
     return 0

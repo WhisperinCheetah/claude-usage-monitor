@@ -34,13 +34,51 @@ def _session_file(session_id: str, base: Path) -> Path:
     return base / f"{safe}.json"
 
 
-def write_status(state, session_id, cwd="", *, now=None, status_dir=None) -> None:
-    """Record `state` ("responding"/"idle") for `session_id`. Best-effort."""
+def write_status(state, session_id, cwd="", model="", *, now=None, status_dir=None) -> None:
+    """Record `state` ("responding"/"idle") for `session_id`. Best-effort.
+
+    `model` is the session's model id (e.g. "claude-opus-4-8"), captured by the
+    hook so the monitor can color a responding agent immediately and for the
+    whole turn, without waiting for the model to surface in the transcript cache.
+    """
     base = _resolve_dir(status_dir)
     ts = time.time() if now is None else now
     base.mkdir(parents=True, exist_ok=True)
-    payload = {"state": state, "ts": ts, "cwd": cwd, "session_id": session_id}
+    payload = {"state": state, "ts": ts, "cwd": cwd, "session_id": session_id,
+               "model": model}
     _session_file(session_id, base).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def model_from_transcript(transcript_path, *, tail_bytes=262144) -> str:
+    """Newest assistant model id in a transcript JSONL, or "" if unknown.
+
+    Reads only the tail so it stays fast when called from a hook on a large
+    transcript. Returns "" on any problem — the model is then simply unknown and
+    a caller must never fail over it.
+    """
+    try:
+        path = Path(transcript_path)
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > tail_bytes:
+                f.seek(size - tail_bytes)
+                f.readline()  # drop the partial line we landed in the middle of
+            data = f.read().decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return ""
+    model = ""
+    for line in data.splitlines():
+        if '"model"' not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        msg = obj.get("message", obj) if isinstance(obj, dict) else {}
+        m = msg.get("model") if isinstance(msg, dict) else None
+        if m:
+            model = m  # keep scanning; the last (newest) one wins
+    return model
 
 
 def clear_status(session_id, *, status_dir=None) -> None:
@@ -75,6 +113,7 @@ def responding_sessions(*, now=None, freshness_seconds=FRESHNESS_SECONDS, status
                 "session_id": str(data.get("session_id") or path.stem),
                 "cwd": str(data.get("cwd") or ""),
                 "ts": ts,
+                "model": str(data.get("model") or ""),
             })
     out.sort(key=lambda s: s["ts"])
     return out
