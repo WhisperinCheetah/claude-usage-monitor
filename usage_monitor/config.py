@@ -7,7 +7,6 @@ from usage_monitor import paths
 DEFAULTS = {
     "x": None, "y": None,
     "timeframe": "month", "mode": "accurate", "delta_window": "24h",
-    "translucent": False,      # widget semi-transparency toggle
     "tray_show_delta": False,  # tray label shows recent delta vs. total
     "spark_range": "24h",      # sparkline range (1h / 24h / 7d / 30d)
     "flash_full_cost": 0.50,   # per-turn $ that maxes out the cost flash intensity

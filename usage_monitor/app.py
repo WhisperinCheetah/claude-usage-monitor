@@ -13,7 +13,6 @@ REFRESH_MS = 3000
 WINDOW_W = 384
 WINDOW_H = 206
 SPARK_H = 26
-SEMI_ALPHA = 0.85  # opacity when "semi-transparent" is on (whole window, incl. text)
 HOT_BUCKET = 11    # heat bucket (of 16) at/above which the cost number pulses
 _MODE_LABELS = [("accurate", "Accurate"), ("simple", "Simple")]
 _MODEL_SHORT = {
@@ -220,8 +219,6 @@ class UsageMonitorApp:
         self._frameless = self._winsys != "aqua"
         if self._frameless:
             self.root.overrideredirect(True)  # no native title bar / min / close
-        # Right mouse button is <Button-2> on macOS, <Button-3> elsewhere.
-        self._rmb = "<Button-2>" if self._winsys == "aqua" else "<Button-3>"
         self.root.attributes("-topmost", True)
         self.root.configure(bg="#1e1e1e")
         self.root.resizable(False, False)
@@ -234,9 +231,6 @@ class UsageMonitorApp:
             )
             geo += f"+{x}+{y}"
         self.root.geometry(geo)
-
-        self._translucent = bool(self.cfg.get("translucent", False))
-        self.root.attributes("-alpha", SEMI_ALPHA if self._translucent else 1.0)
 
         # Animation / effect state.
         self._cost_shown = 0.0           # currently-displayed cost (for roll-up)
@@ -266,7 +260,6 @@ class UsageMonitorApp:
         self._burst_idx = 0
 
         self._build_widgets()
-        self._build_context_menu()
         self._bind_drag()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -577,33 +570,10 @@ class UsageMonitorApp:
         config.save_config(self.config_file, self.cfg)
         self.refresh()
 
-    def _build_context_menu(self):
-        self._translucent_var = tk.BooleanVar(value=self._translucent)
-        self._ctx = tk.Menu(self.root, tearoff=0)
-        self._ctx.add_checkbutton(label="Semi-transparent",
-                                  variable=self._translucent_var,
-                                  command=self._toggle_opacity)
-        self._ctx.add_separator()
-        self._ctx.add_command(label="Quit", command=self._on_close)
-
-    def _show_context_menu(self, event):
-        try:
-            self._ctx.tk_popup(event.x_root, event.y_root)
-        finally:
-            self._ctx.grab_release()  # release the input grab so the menu dismisses
-
-    def _toggle_opacity(self):
-        self._translucent = self._translucent_var.get()
-        self.root.attributes("-alpha", SEMI_ALPHA if self._translucent else 1.0)
-        self._save()
-
     def _bind_drag(self):
         for w in self._drag_targets:
             w.bind("<Button-1>", self._start_drag)
             w.bind("<B1-Motion>", self._on_drag)
-            w.bind(self._rmb, self._show_context_menu)  # platform right-click
-            if self._winsys == "aqua":
-                w.bind("<Control-Button-1>", self._show_context_menu)  # mac alt
 
     def _start_drag(self, event):
         self._drag_x = event.x_root - self.root.winfo_x()
@@ -636,7 +606,6 @@ class UsageMonitorApp:
         self.cfg["timeframe"] = self._current_timeframe_key()
         self.cfg["mode"] = self._current_mode_key()
         self.cfg["delta_window"] = self.delta_var.get()
-        self.cfg["translucent"] = self._translucent
         self.cfg["x"] = self.root.winfo_x()
         self.cfg["y"] = self.root.winfo_y()
         config.save_config(self.config_file, self.cfg)
