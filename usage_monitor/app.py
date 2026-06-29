@@ -642,7 +642,10 @@ class UsageMonitorApp:
             start, end = aggregate.timeframe_bounds(tf, datetime.now(timezone.utc))
             selected = aggregate.filter_by_time(records, start, end)
 
-        now = datetime.now(timezone.utc)
+        # Local-aware: the sparkline aligns day/hour buckets to this timezone,
+        # so day bars reset at the user's midnight, not UTC. All other uses are
+        # absolute-time comparisons/timestamps, unaffected by the offset.
+        now = datetime.now().astimezone()
         result = aggregate.rollup(selected, mode)
         self.tokens_label.config(text=f"Tokens   {fmt_tokens(result['total_tokens'])}")
         self._set_cost(result["total_cost"])  # animated roll-up
