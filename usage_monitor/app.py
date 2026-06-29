@@ -585,7 +585,7 @@ class UsageMonitorApp:
         # Anchor "s" pins the text box bottom (baseline + descent) at `y`;
         # pushing y down by the descent lands the digit baseline on the bar's
         # bottom edge so the number sits flush on it.
-        baseline_y = y1 + f.metrics("descent")
+        baseline_y = y1 + f.metrics("descent") - 2
         c.create_text((x0 + x1) / 2, baseline_y, anchor="s", text=label,
                       fill=_blend(bar_color, "#000000", 0.62), font=f)
 
