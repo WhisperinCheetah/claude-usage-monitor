@@ -3,11 +3,12 @@ import math
 import re
 import subprocess
 import tkinter as tk
+import tkinter.font as tkfont
 from datetime import datetime, timezone
 from pathlib import Path
 
 from usage_monitor import aggregate, config, heat, pricing, sparkline, status, transcripts
-from usage_monitor.format import fmt_cost, fmt_tokens
+from usage_monitor.format import fmt_cost, fmt_spark_cost, fmt_tokens
 
 REFRESH_MS = 3000
 WINDOW_W = 384
@@ -375,6 +376,8 @@ class UsageMonitorApp:
         self.spark = tk.Canvas(self.root, height=SPARK_H, bg="#1e1e1e", highlightthickness=0)
         self.spark.pack(fill="x", padx=8, pady=(2, 2))
         self.spark.bind("<Button-1>", self._cycle_spark_range)
+        # Cached so per-bar label fit checks measure the exact render font.
+        self._spark_font = tkfont.Font(font=("TkDefaultFont", 7))
 
         self._drag_targets = [self.root, topbar, self.dots, self.flash_label,
                               body, cost_row, self.tokens_label, self.cost_label,
@@ -562,8 +565,29 @@ class UsageMonitorApp:
                 y1, y0 = SPARK_H - 2, SPARK_H - 2 - bh
                 color = _COST_HOT if i == n - 1 else _COST_BASE  # newest bar brighter
                 c.create_rectangle(x0, y0, x1, y1, fill=color, width=0)
+                self._draw_bar_label(c, fmt_spark_cost(v), x0, x1, y0, y1, color)
         c.create_text(2, 0, anchor="nw", text=self.cfg.get("spark_range", "24h"),
                       fill="#666666", font=("TkDefaultFont", 7))
+
+    def _draw_bar_label(self, c, label, x0, x1, y0, y1, bar_color):
+        """A small darker $ value at the bottom inside a bar, only if it fits.
+
+        Skipped when the bar is too narrow for the text or too short to contain
+        a line of it — so zero/tiny bars stay clean."""
+        if not label:
+            return
+        f = self._spark_font
+        if f.measure(label) > (x1 - x0) - 1:    # too narrow
+            return
+        ascent = f.metrics("ascent")
+        if (y1 - y0) < ascent + 1:              # too short to hold a digit
+            return
+        # Anchor "s" pins the text box bottom (baseline + descent) at `y`;
+        # pushing y down by the descent lands the digit baseline on the bar's
+        # bottom edge so the number sits flush on it.
+        baseline_y = y1 + f.metrics("descent")
+        c.create_text((x0 + x1) / 2, baseline_y, anchor="s", text=label,
+                      fill=_blend(bar_color, "#000000", 0.62), font=f)
 
     def _cycle_spark_range(self, _event=None):
         self.cfg["spark_range"] = sparkline.next_range(self.cfg.get("spark_range", "24h"))

@@ -13,6 +13,14 @@ class TestFormat(unittest.TestCase):
         self.assertEqual(fmt.fmt_cost(58.912), "$58.91")
         self.assertEqual(fmt.fmt_cost(0), "$0.00")
 
+    def test_spark_cost(self):
+        self.assertEqual(fmt.fmt_spark_cost(0), "")
+        self.assertEqual(fmt.fmt_spark_cost(-1), "")
+        self.assertEqual(fmt.fmt_spark_cost(0.423), "$0.42")
+        self.assertEqual(fmt.fmt_spark_cost(3.42), "$3.4")
+        self.assertEqual(fmt.fmt_spark_cost(42.6), "$43")
+        self.assertEqual(fmt.fmt_spark_cost(123.4), "$123")
+
 
 if __name__ == "__main__":
     unittest.main()
