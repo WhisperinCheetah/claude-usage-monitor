@@ -377,7 +377,7 @@ class UsageMonitorApp:
         self.spark.pack(fill="x", padx=8, pady=(2, 2))
         self.spark.bind("<Button-1>", self._cycle_spark_range)
         # Cached so per-bar label fit checks measure the exact render font.
-        self._spark_font = tkfont.Font(font=("TkDefaultFont", 7))
+        self._spark_font = tkfont.Font(font=("TkDefaultFont", 8))
 
         self._drag_targets = [self.root, topbar, self.dots, self.flash_label,
                               body, cost_row, self.tokens_label, self.cost_label,
